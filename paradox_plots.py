@@ -29,8 +29,8 @@ def draw_cluster_scatter(x, y, n_points, title,
                          show_grid=False, grid_k=5, dark=True):
     """2D scatter of the points with optional quadrat grid overlay."""
     fig = _base_fig(dark,
-                    height=340,
-                    margin=dict(l=40, r=12, t=24, b=30))
+                    height=None,
+                    margin=dict(l=40, r=12, t=16, b=24))
     th = _theme(dark)
 
     marker_col = _C_POINTS
@@ -81,7 +81,7 @@ def draw_cluster_scatter(x, y, n_points, title,
 
 def draw_quadrat_chart(x, y, grid_k=5, dark=True):
     """Bar chart of observed counts per quadrat vs expected Poisson distribution."""
-    fig = _base_fig(dark, height=200, margin=dict(l=40, r=12, t=12, b=30))
+    fig = _base_fig(dark, height=None, margin=dict(l=40, r=12, t=8, b=30))
     th = _theme(dark)
     n = len(x)
     n_cells = grid_k ** 2
@@ -156,7 +156,7 @@ def draw_quadrat_chart(x, y, grid_k=5, dark=True):
 
 def draw_nn_distance(x, y, n_points, dark=True):
     """Histogram of nearest-neighbour distances vs theoretical CSR distribution."""
-    fig = _base_fig(dark, height=200, margin=dict(l=40, r=12, t=12, b=30))
+    fig = _base_fig(dark, height=None, margin=dict(l=40, r=12, t=8, b=30))
     th = _theme(dark)
 
     pts = np.column_stack([x, y])

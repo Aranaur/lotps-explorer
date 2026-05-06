@@ -123,7 +123,7 @@ def paradox_panel() -> ui.Tag:
                         ui.output_ui("pdx_scatter_b"),
                         class_="glass-card chart-card",
                     ),
-                    style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;"
+                    style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; height: 40vh; min-height: 250px;"
                 ),
 
                 # Analysis rows

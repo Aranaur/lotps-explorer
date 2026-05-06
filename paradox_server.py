@@ -155,7 +155,7 @@ def paradox_server(input, output, session, is_dark):
     @render.ui
     def pdx_sidebar_analysis_text():
         if not input.pdx_show_analysis():
-            return ui.div()
+            return None
         return ui.div(
             "Notice how the random plot has a wider variance in quadrat counts and matches the theoretical Poisson distribution, "
             "while the stratified plot has artificially consistent quadrat counts and avoids small NN distances.",
@@ -166,7 +166,7 @@ def paradox_server(input, output, session, is_dark):
     @render.ui
     def pdx_analysis_area():
         if not input.pdx_show_analysis():
-            return ui.div()
+            return None
             
         x_a = _points_a_x()
         y_a = _points_a_y()
@@ -187,7 +187,7 @@ def paradox_server(input, output, session, is_dark):
         fig_nn_a = draw_nn_distance(x_a, y_a, len(x_a), dark=is_dark())
         fig_nn_b = draw_nn_distance(x_b, y_b, len(x_b), dark=is_dark())
 
-        return ui.div(
+        return ui.TagList(
             # Quadrat Row
             ui.div(
                 ui.div(
@@ -210,7 +210,7 @@ def paradox_server(input, output, session, is_dark):
                     fig_to_ui(fig_quad_b),
                     class_="glass-card chart-card",
                 ),
-                style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;"
+                style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; height: 22vh; min-height: 150px;"
             ),
             # NN Row
             ui.div(
@@ -234,6 +234,6 @@ def paradox_server(input, output, session, is_dark):
                     fig_to_ui(fig_nn_b),
                     class_="glass-card chart-card",
                 ),
-                style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;"
+                style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; height: 22vh; min-height: 150px;"
             ),
         )

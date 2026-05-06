@@ -14,6 +14,7 @@ from vr_ui import vr_panel
 from boot_ui import boot_panel
 from bayes_ui import bayes_panel
 from ci_ui import ci_panel
+from paradox_ui import paradox_panel
 
 app_ui = ui.page_fluid(
 
@@ -49,7 +50,10 @@ app_ui = ui.page_fluid(
     # ── Navigation ────────────────────────────────────────────────────────────
     ui.navset_pill(
 
-        # ── Tab 1: CI Explorer ────────────────────────────────────────────────
+        # ── Tab 1: Paradox Explorer ──────────────────────────────────────────
+        paradox_panel(),
+
+        # ── Tab 2: CI Explorer ────────────────────────────────────────────────
         ci_panel(),
 
         # ── Tab 2: p-value Explorer ────────────────────────────────────────────

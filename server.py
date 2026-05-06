@@ -15,6 +15,7 @@ from boot_server import boot_server
 from bayes_server import bayes_server
 
 from ci_server import ci_server
+from paradox_server import paradox_server
 
 
 
@@ -40,3 +41,5 @@ def server(input, output, session):
     bayes_server(input, output, session, is_dark)
 
     ci_server(input, output, session, is_dark)
+
+    paradox_server(input, output, session, is_dark)

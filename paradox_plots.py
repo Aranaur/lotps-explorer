@@ -336,3 +336,153 @@ def draw_simpsons_scatter(x, y, group, show_groups=False,
         ),
     )
     return fig
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5.  Base Rate Fallacy — Sankey & Waffle
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def draw_baserate_sankey(tp, fp, fn, tn, dark=True):
+    """Sankey diagram showing probability flow from population to test results."""
+    fig = _base_fig(dark, height=450, margin=dict(l=24, r=24, t=16, b=16))
+    th = _theme(dark)
+
+    sick = tp + fn
+    healthy = fp + tn
+    total = sick + healthy
+    pos = tp + fp
+    neg = tn + fn
+
+    # Use integer labels when close to whole numbers, otherwise 1 decimal
+    def _fmt(v):
+        return f"{v:,.0f}" if v >= 1 else f"{v:,.1f}"
+
+    labels = [
+        f"Population ({_fmt(total)})",
+        f"Sick ({_fmt(sick)})",
+        f"Healthy ({_fmt(healthy)})",
+        f"Test + ({_fmt(pos)})",
+        f"Test \u2212 ({_fmt(neg)})",
+    ]
+
+    c_pop     = "#64748b"
+    c_sick    = "#ef4444"
+    c_healthy = "#3b82f6"
+    c_pos     = "#f97316"
+    c_neg     = "#10b981"
+
+    # Custom link labels
+    link_labels = [
+        f"Sick: {_fmt(sick)}",
+        f"Healthy: {_fmt(healthy)}",
+        f"TP: {_fmt(tp)}",
+        f"FN: {_fmt(fn)}",
+        f"FP: {_fmt(fp)}",
+        f"TN: {_fmt(tn)}",
+    ]
+
+    fig.add_trace(go.Sankey(
+        node=dict(
+            pad=25, thickness=30,
+            line=dict(color="rgba(0,0,0,0)", width=0),
+            label=labels,
+            color=[c_pop, c_sick, c_healthy, c_pos, c_neg],
+        ),
+        link=dict(
+            source=[0, 0, 1, 1, 2, 2],
+            target=[1, 2, 3, 4, 3, 4],
+            value=[max(sick, 0.01), max(healthy, 0.01),
+                   max(tp, 0.01), max(fn, 0.01),
+                   max(fp, 0.01), max(tn, 0.01)],
+            label=link_labels,
+            color=[
+                "rgba(239, 68, 68, 0.3)",    # pop → sick
+                "rgba(59, 130, 246, 0.25)",  # pop → healthy
+                "rgba(239, 68, 68, 0.65)",   # sick → pos (TP) - Red
+                "rgba(168, 85, 247, 0.65)",  # sick → neg (FN) - Purple
+                "rgba(59, 130, 246, 0.65)",  # healthy → pos (FP) - Blue
+                "rgba(100, 116, 139, 0.25)", # healthy → neg (TN) - Muted Grey
+            ],
+        ),
+    ))
+
+    fig.update_layout(font=dict(size=13, color=th["label"]))
+    return fig
+
+
+def draw_baserate_waffle(tp, fp, fn, tn, dark=True):
+    """Icon Array (waffle chart) for Base Rate Fallacy.
+
+    Uses a 50×50 grid = 2,500 dots.  Scales input counts proportionally.
+    Places the small categories (TP, FP, FN) first so they appear in the
+    top-left corner and remain visible even at very low prevalence.
+    """
+    GRID = 30   # 30×30 = 900 dots — larger and more readable
+    N = GRID * GRID
+
+    fig = _base_fig(dark, height=None, margin=dict(l=8, r=8, t=8, b=8))
+    th = _theme(dark)
+
+    total = tp + fp + fn + tn
+    if total == 0:
+        return fig
+
+    # ── Scale to N dots ──────────────────────────────────────────────────
+    scale = N / total
+    s_tp = max(int(round(tp * scale)), 1 if tp > 0 else 0)
+    s_fp = max(int(round(fp * scale)), 1 if fp > 0 else 0)
+    s_fn = max(int(round(fn * scale)), 1 if fn > 0 else 0)
+    s_tn = N - (s_tp + s_fp + s_fn)
+    s_tn = max(0, s_tn)
+
+    # ── Assign each dot a category (TP first → top-left) ────────────────
+    cat_ids = np.zeros(N, dtype=int)   # 0 = TN by default
+    idx = 0
+    for cat_id, cnt in [(1, s_tp), (2, s_fp), (3, s_fn)]:
+        cat_ids[idx:idx + cnt] = cat_id
+        idx += cnt
+
+    # ── Grid coordinates (row-major, top-left origin) ────────────────────
+    col, row = np.meshgrid(np.arange(GRID), np.arange(GRID - 1, -1, -1))
+    xs = col.flatten()
+    ys = row.flatten()
+
+    # ── Colours and labels ───────────────────────────────────────────────
+    spec = [
+        (0, '#334155' if dark else '#cbd5e1',
+         f'Healthy, Test \u2212 (TN: {tn:,.0f})'),
+        (1, '#ef4444',  # Red
+         f'Sick, Test + (TP: {tp:,.0f})'),
+        (2, '#3b82f6',  # Blue (distinct from Red/Pink)
+         f'Healthy, Test + (FP: {fp:,.0f})'),
+        (3, '#a855f7',  # Purple
+         f'Sick, Test \u2212 (FN: {fn:,.0f})'),
+    ]
+
+    for cat_id, color, label in spec:
+        mask = cat_ids == cat_id
+        cnt = int(mask.sum())
+        if cnt == 0:
+            continue
+        fig.add_trace(go.Scatter(
+            x=xs[mask], y=ys[mask], mode="markers",
+            marker=dict(symbol="square", size=12,
+                        color=color, line=dict(width=0)),
+            name=label, hoverinfo="name",
+        ))
+
+    fig.update_layout(
+        xaxis=dict(visible=False, range=[-1, GRID + 1]),
+        yaxis=dict(visible=False, range=[-1, GRID + 1],
+                   scaleanchor="x", scaleratio=1),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom", y=1.01,
+            xanchor="center", x=0.5,
+            font=dict(size=10),
+        ),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig

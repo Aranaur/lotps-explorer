@@ -1,239 +1,276 @@
 # =============================================================================
 # Paradox Explorer — UI panel
 #
-# Sub-tab layout modelled after Bayesian Explorer:
-#   Tab 1  Clustering Illusion   (pdx1_*)
-#   Tab 2  Simpson's Paradox     (pdx2_*)
-#
-# A single outer sidebar holds both control groups; a tiny JS listener
-# toggles visibility based on the active navset_underline tab.
+# Sub-tab layout:
+#   Tab 1  Base Rate Fallacy     (pdx_brf_*)
+#   Tab 2  Clustering Illusion   (pdx_clust_*)
+#   Tab 3  Simpson's Paradox     (pdx_simp_*)
 # =============================================================================
 
 from shiny import ui
 from utils import tip
 
 
-# ── Sidebar: Tab 1 — Clustering Illusion ─────────────────────────────────────
+# ── Sidebar: Tab 1 — Base Rate Fallacy ───────────────────────────────────────
 
-def _sidebar_tab1() -> ui.Tag:
+def _sidebar_tab_brf() -> ui.Tag:
     return ui.div(
         # Misconception banner
         ui.div(
             ui.tags.i(class_="info-icon"),
-            ui.tags.strong(" Clustering Illusion: "),
-            "Humans see patterns and clusters in random data — "
-            "our brains are wired to find structure even where none exists.",
+            ui.tags.strong(" Misconception: "),
+            "If a test is 99\u202f% accurate and you test positive, "
+            "you have a 99\u202f% chance of having the disease.",
             ui.tags.br(),
             ui.tags.strong("Reality: "),
-            "True randomness produces ",
-            ui.tags.em("clumps and gaps"),
-            " by chance. A perfectly uniform spread would actually be ",
-            ui.tags.em("non-random"),
-            ".",
+            "When a condition is rare (low base rate), the majority of "
+            "positive results can be false positives, even with a highly "
+            "accurate test.",
             class_="info-banner-text",
         ),
 
-        # Challenge text
+        # Presets
+        ui.tags.label(
+            "Examples",
+            style="font-weight:500; color:var(--c-text3); font-size:0.82rem; margin-bottom:2px;",
+        ),
+        ui.div(
+            ui.input_action_button("pdx_brf_pre_disease", "Rare Disease", class_="btn-ctrl btn-preset"),
+            ui.input_action_button("pdx_brf_pre_terror", "Facial Recog.", class_="btn-ctrl btn-preset"),
+            ui.input_action_button("pdx_brf_pre_quality", "Quality Ctrl", class_="btn-ctrl btn-preset"),
+            ui.input_action_button("pdx_brf_pre_lottery", "Lottery Fraud", class_="btn-ctrl btn-preset"),
+            class_="np-preset-grid",
+            style="grid-template-columns: 1fr 1fr;",
+        ),
+        ui.output_ui("pdx_brf_preset_desc"),
+
+        ui.div(
+            ui.div("BAYES' THEOREM", class_="card-title"),
+            ui.output_ui("pdx_brf_formula"),
+            class_="glass-card formulas-card",
+            style="margin-bottom: 8px; text-align: center; overflow-x: auto;",
+        ),
+
+        # Population
+        ui.input_select(
+            "pdx_brf_pop",
+            ui.TagList(
+                "Population Size",
+                tip("Total number of people being tested. "
+                    "Natural frequencies make the math intuitive."),
+            ),
+            choices={"10000": "10,000", "100000": "100,000",
+                     "1000000": "1,000,000"},
+            selected="10000", width="100%",
+        ),
+
+        # Prevalence
+        ui.input_numeric(
+            "pdx_brf_prev",
+            ui.TagList(
+                "Prevalence (Base Rate) %",
+                tip("The percentage of the population that actually has the "
+                    "disease. Try very small values like 0.01\u202f%."),
+            ),
+            value=1, min=0.001, max=100.0, step=0.01, width="100%",
+        ),
+
+        # Sensitivity
+        ui.input_slider(
+            "pdx_brf_sens",
+            ui.TagList("Sensitivity % (TPR)",
+                       tip("True Positive Rate: P(+\u2009|\u2009Disease). "
+                           "Probability that a sick person tests positive.")),
+            min=50, max=100, value=99, step=1, width="100%",
+        ),
+
+        # Specificity
+        ui.input_slider(
+            "pdx_brf_spec",
+            ui.TagList("Specificity % (TNR)",
+                       tip("True Negative Rate: P(\u2212\u2009|\u2009Healthy). "
+                           "Probability that a healthy person tests negative.")),
+            min=50, max=100, value=95, step=1, width="100%",
+        ),
+
+        class_="pdx-sidebar-group", **{"data-pdx-tab": "brf"},
+    )
+
+
+# ── Sidebar: Tab 2 — Clustering Illusion ─────────────────────────────────────
+
+def _sidebar_tab_clust() -> ui.Tag:
+    return ui.div(
+        ui.div(
+            ui.tags.i(class_="info-icon"),
+            ui.tags.strong(" Clustering Illusion: "),
+            "Humans see patterns and clusters in random data \u2014 our brains "
+            "are wired to find structure even where none exists.",
+            ui.tags.br(),
+            ui.tags.strong("Reality: "),
+            "True randomness produces ",
+            ui.tags.em("clumps and gaps"), " by chance. "
+            "A perfectly uniform spread would actually be ",
+            ui.tags.em("non-random"), ".",
+            class_="info-banner-text",
+        ),
+
         ui.div(
             "Can you tell which one is purely random and which one is "
             "stratified (regular)? Our brains often pick the stratified "
             "one as \u2018random\u2019 because it looks more evenly spread.",
-            style="margin-bottom: 16px; font-size: 0.82rem; font-style: italic; "
-                  "color: var(--c-text3); line-height: 1.4;",
+            style="margin-bottom: 16px; font-size: 0.82rem; "
+                  "font-style: italic; color: var(--c-text3); "
+                  "line-height: 1.4;",
         ),
 
-        # Sample size
         ui.input_numeric(
-            "pdx1_n",
-            ui.TagList(
-                "Number of points (N)",
-                tip("Total points to scatter. "
-                    "More points make the illusion more convincing."),
-            ),
+            "pdx_clust_n",
+            ui.TagList("Number of points (N)",
+                       tip("Total points to scatter on each plot.")),
             value=200, min=10, max=2000, step=10, width="100%",
         ),
 
-        # Grid toggle
-        ui.input_checkbox(
-            "pdx1_show_grid",
-            ui.TagList(
-                "Show quadrat grid",
-                tip("Overlay a grid to help visual inspection."),
-            ),
-            value=False,
-        ),
+        ui.input_checkbox("pdx_clust_show_grid",
+                          "Show quadrat grid", value=False),
+        ui.output_ui("pdx_clust_grid_controls"),
 
-        # Grid division slider (rendered dynamically)
-        ui.output_ui("pdx1_grid_controls"),
+        ui.input_checkbox("pdx_clust_show_analysis",
+                          "Show Analysis", value=False),
+        ui.output_ui("pdx_clust_sidebar_analysis_text"),
 
-        # Analysis toggle
-        ui.input_checkbox(
-            "pdx1_show_analysis",
-            ui.TagList(
-                "Show Analysis",
-                tip("Show Quadrat Analysis and Nearest-Neighbour Distances charts."),
-            ),
-            value=False,
-        ),
+        ui.input_switch("pdx_clust_reveal",
+                        "Reveal Answer", value=False),
 
-        # Analysis explanatory text
-        ui.output_ui("pdx1_sidebar_analysis_text"),
-
-        # Reveal toggle
-        ui.input_switch(
-            "pdx1_reveal",
-            "Reveal Answer",
-            value=False,
-        ),
-
-        # Generate button
         ui.div(
             ui.input_action_button(
-                "pdx1_btn_generate", "\u21bb  New Pair",
+                "pdx_clust_btn_generate", "\u21bb  New Pair",
                 class_="btn-ctrl btn-sample btn-full",
             ),
             class_="sidebar-btn-row",
         ),
 
-        class_="pdx-sidebar-group", **{"data-pdx-tab": "1"},
+        class_="pdx-sidebar-group", **{"data-pdx-tab": "clust"},
     )
 
 
-# ── Sidebar: Tab 2 — Simpson's Paradox ───────────────────────────────────────
+# ── Sidebar: Tab 3 — Simpson's Paradox ───────────────────────────────────────
 
-def _sidebar_tab2() -> ui.Tag:
+def _sidebar_tab_simp() -> ui.Tag:
     return ui.div(
-        # Misconception banner
         ui.div(
             ui.tags.i(class_="info-icon"),
             ui.tags.strong(" Simpson\u2019s Paradox: "),
             "A trend that appears in several groups of data can ",
-            ui.tags.em("reverse"),
-            " when the groups are combined.",
+            ui.tags.em("reverse"), " when the groups are combined.",
             ui.tags.br(),
             ui.tags.strong("Reality: "),
-            "Ignoring a confounding variable (the groups) produces a "
-            "misleading overall trend. Always check sub-group behaviour.",
+            "Ignoring a confounding variable (the groups) produces "
+            "a misleading overall trend. Always check sub-group behaviour.",
             class_="info-banner-text",
         ),
 
-        # Dynamic explanation
-        ui.output_ui("pdx2_explanation"),
+        ui.output_ui("pdx_simp_explanation"),
 
-        # Number of points
         ui.input_slider(
-            "pdx2_n",
-            ui.TagList(
-                "Points per group",
-                tip("Number of observations generated within each group."),
-            ),
+            "pdx_simp_n",
+            ui.TagList("Points per group",
+                       tip("Number of observations in each sub-group.")),
             min=30, max=300, value=80, step=10, width="100%",
         ),
-
-        # Number of groups
         ui.input_slider(
-            "pdx2_k",
-            ui.TagList(
-                "Number of groups (k)",
-                tip("The confounding variable with k levels. "
-                    "Each group has a positive within-group slope, but the "
-                    "overall slope reverses."),
-            ),
+            "pdx_simp_k",
+            ui.TagList("Number of groups (k)",
+                       tip("Number of hidden sub-groups (confounders).")),
             min=2, max=6, value=3, step=1, width="100%",
         ),
-
-        # Noise level
         ui.input_slider(
-            "pdx2_noise",
-            ui.TagList(
-                "Noise level",
-                tip("Controls the scatter around each group\u2019s regression line. "
-                    "Higher noise makes the paradox less obvious."),
-            ),
+            "pdx_simp_noise",
+            ui.TagList("Noise level",
+                       tip("Controls the scatter around each group\u2019s "
+                           "regression line. Higher noise makes the paradox "
+                           "less obvious.")),
             min=0.1, max=2.0, value=1.8, step=0.1, width="100%",
         ),
 
-        # Show groups
-        ui.input_checkbox(
-            "pdx2_show_groups",
-            ui.TagList(
-                "Show groups (colour)",
-                tip("Reveal the hidden confounding variable by "
-                    "colour-coding the groups."),
-            ),
-            value=False,
-        ),
+        ui.input_checkbox("pdx_simp_show_groups",
+                          "Show groups (colour)", value=False),
+        ui.input_checkbox("pdx_simp_show_trends",
+                          "Show trendlines", value=False),
 
-        # Show trendlines
-        ui.input_checkbox(
-            "pdx2_show_trends",
-            ui.TagList(
-                "Show trendlines",
-                tip("Overlay OLS regression lines \u2014 overall "
-                    "and (when groups are shown) per-group."),
-            ),
-            value=False,
-        ),
-
-        # Generate button
         ui.div(
             ui.input_action_button(
-                "pdx2_btn_generate", "\u21bb  New Data",
+                "pdx_simp_btn_generate", "\u21bb  New Data",
                 class_="btn-ctrl btn-sample btn-full",
             ),
             class_="sidebar-btn-row",
         ),
 
-        class_="pdx-sidebar-group", **{"data-pdx-tab": "2"},
+        class_="pdx-sidebar-group", **{"data-pdx-tab": "simp"},
     )
 
 
 # ── Main-panel sub-tabs ─────────────────────────────────────────────────────
 
-def _main_tab1() -> ui.Tag:
-    """Clustering Illusion main panel content."""
+def _main_tab_brf() -> ui.Tag:
     return ui.nav_panel(
-        "Clustering Illusion",
+        "Base Rate Fallacy",
 
-        # Scatter plots row
+        # Stats row
+        ui.output_ui("pdx_brf_stats_row"),
+
+        # View selector and Chart area
         ui.div(
             ui.div(
-                ui.div(ui.output_text("pdx1_title_a", inline=True),
-                       class_="card-title"),
-                ui.output_ui("pdx1_scatter_a"),
-                class_="glass-card chart-card",
+                ui.input_radio_buttons(
+                    "pdx_brf_view", "",
+                    choices=["Icon Array (Waffle)", "Probability Flow (Sankey)"],
+                    inline=True
+                )
             ),
             ui.div(
-                ui.div(ui.output_text("pdx1_title_b", inline=True),
-                       class_="card-title"),
-                ui.output_ui("pdx1_scatter_b"),
-                class_="glass-card chart-card",
+                ui.output_ui("pdx_brf_chart_area"),
+                style="flex: 1; min-height: 450px; position: relative; z-index: 1;"
             ),
-            style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; "
-                  "margin-bottom: 8px; height: 40vh; min-height: 250px;",
+            class_="glass-card",
+            style="flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding-top: 12px;",
         ),
-
-        # Analysis rows (dynamic)
-        ui.output_ui("pdx1_analysis_area"),
     )
 
 
-def _main_tab2() -> ui.Tag:
-    """Simpson's Paradox main panel content."""
+def _main_tab_clust() -> ui.Tag:
     return ui.nav_panel(
-        "Simpson\u2019s Paradox",
-
-        # Stats row
-        ui.output_ui("pdx2_stats_row"),
-
-        # Main scatter
+        "Clustering Illusion",
         ui.div(
             ui.div(
-                ui.div(
-                    ui.output_ui("pdx2_chart_title"),
-                    class_="card-title",
-                ),
-                ui.output_ui("pdx2_scatter"),
+                ui.div(ui.output_text("pdx_clust_title_a", inline=True),
+                       class_="card-title"),
+                ui.output_ui("pdx_clust_scatter_a"),
+                class_="glass-card chart-card",
+            ),
+            ui.div(
+                ui.div(ui.output_text("pdx_clust_title_b", inline=True),
+                       class_="card-title"),
+                ui.output_ui("pdx_clust_scatter_b"),
+                class_="glass-card chart-card",
+            ),
+            style="display: grid; grid-template-columns: 1fr 1fr; "
+                  "gap: 8px; margin-bottom: 8px; "
+                  "height: 40vh; min-height: 250px;",
+        ),
+        ui.output_ui("pdx_clust_analysis_area"),
+    )
+
+
+def _main_tab_simp() -> ui.Tag:
+    return ui.nav_panel(
+        "Simpson\u2019s Paradox",
+        ui.output_ui("pdx_simp_stats_row"),
+        ui.div(
+            ui.div(
+                ui.div(ui.output_ui("pdx_simp_chart_title"),
+                       class_="card-title"),
+                ui.output_ui("pdx_simp_scatter"),
                 class_="glass-card chart-card",
             ),
             class_="charts-area",
@@ -247,9 +284,10 @@ def _main_tab2() -> ui.Tag:
 _PDX_TAB_SCRIPT = ui.tags.script("""
     (function() {
         function byTab(label) {
-            if (label.indexOf('Clustering') !== -1) return '1';
-            if (label.indexOf('Simpson')    !== -1) return '2';
-            return '1';
+            if (label.indexOf('Base Rate') !== -1) return 'brf';
+            if (label.indexOf('Clustering') !== -1) return 'clust';
+            if (label.indexOf('Simpson')    !== -1) return 'simp';
+            return 'brf';
         }
         function sync(active) {
             document.querySelectorAll('.pdx-sidebar-group').forEach(function(el) {
@@ -260,11 +298,12 @@ _PDX_TAB_SCRIPT = ui.tags.script("""
         document.addEventListener('DOMContentLoaded', function() {
             setTimeout(function() {
                 var active = document.querySelector(
-                    '#pdx_subtabs .nav-link.active, a.nav-link.active[data-bs-toggle]'
+                    '#pdx_subtabs .nav-link.active'
                 );
-                sync(byTab(active ? active.textContent : 'Clustering'));
+                sync(byTab(active ? active.textContent : 'Base Rate'));
             }, 50);
         });
+        // Only respond to outer sub-tab changes (not inner viz tabs)
         document.addEventListener('shown.bs.tab', function(e) {
             var t = e.target;
             if (!t) return;
@@ -272,8 +311,35 @@ _PDX_TAB_SCRIPT = ui.tags.script("""
             if (!container) return;
             sync(byTab(t.textContent || ''));
         });
+        // Re-typeset MathJax whenever Shiny updates the formula output
+        if (window.jQuery) {
+            $(document).on('shiny:value', function(event) {
+                if (event.name === 'pdx_brf_formula') {
+                    setTimeout(function() {
+                        if (window.MathJax && MathJax.typesetPromise) {
+                            MathJax.typesetPromise();
+                        }
+                    }, 50);
+                }
+            });
+        }
     })();
 """)
+
+
+# ── MathJax config (loaded ONCE, before the library) ────────────────────────
+
+_MATHJAX_CONFIG = ui.tags.script("""
+    window.MathJax = {
+        tex:  { inlineMath: [['$','$'], ['\\\\(','\\\\)']] },
+        options: { skipHtmlTags: ['script','noscript','style','textarea','code'] }
+    };
+""")
+
+_MATHJAX_SRC = ui.tags.script(
+    src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js",
+    async_="",
+)
 
 
 # ── Nav panel ───────────────────────────────────────────────────────────────
@@ -282,41 +348,42 @@ def paradox_panel() -> ui.Tag:
     return ui.nav_panel(
         "Paradox Explorer",
 
+        _MATHJAX_CONFIG,
+        _MATHJAX_SRC,
         _PDX_TAB_SCRIPT,
 
         ui.div(
-            # ── Single outer sidebar ────────────────────────────────────────
             ui.div(
-                _sidebar_tab1(),
-                _sidebar_tab2(),
+                _sidebar_tab_brf(),
+                _sidebar_tab_clust(),
+                _sidebar_tab_simp(),
 
-                # Footer
                 ui.div(
                     ui.tags.a("LinkedIn",
-                              href="https://www.linkedin.com/in/ihormiroshnychenko/",
+                              href="https://www.linkedin.com/in/"
+                                   "ihormiroshnychenko/",
                               target="_blank"),
                     " \u2022 ",
-                    ui.tags.a("Telegram", href="https://t.me/araprof",
+                    ui.tags.a("Telegram",
+                              href="https://t.me/araprof",
                               target="_blank"),
                     " \u2022 ",
-                    ui.tags.a("Website", href="https://aranaur.rbind.io/",
+                    ui.tags.a("Website",
+                              href="https://aranaur.rbind.io/",
                               target="_blank"),
                     class_="footer-links",
                 ),
-
                 class_="sidebar pdx-sidebar",
             ),
-
-            # ── Main panel with nested navset ───────────────────────────────
             ui.div(
                 ui.navset_underline(
-                    _main_tab1(),
-                    _main_tab2(),
+                    _main_tab_brf(),
+                    _main_tab_clust(),
+                    _main_tab_simp(),
                     id="pdx_subtabs",
                 ),
                 class_="main-panel",
             ),
-
             class_="app-body",
         ),
     )

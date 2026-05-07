@@ -242,6 +242,47 @@ h1.main-title {
   overflow: hidden;
   transition: background 0.25s, border-color 0.25s;
 }
+/* Base Rate Fallacy View Selector (Segmented Pill Control) */
+#pdx_brf_view {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 16px;
+    margin-top: 4px;
+}
+#pdx_brf_view .shiny-options-group {
+    display: flex;
+    background: var(--c-input);
+    border-radius: 8px;
+    padding: 4px;
+    border: 1px solid var(--c-border);
+    gap: 4px;
+}
+#pdx_brf_view .radio {
+    margin: 0;
+}
+#pdx_brf_view input[type="radio"] {
+    display: none; /* Hide the standard radio circle */
+}
+#pdx_brf_view span {
+    padding: 6px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--c-text3);
+    transition: all 0.2s ease;
+    display: inline-block;
+    font-size: 0.9rem;
+}
+#pdx_brf_view input[type="radio"]:checked + span {
+    background: linear-gradient(135deg, #0ea5e9, #6366f1);
+    color: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+#pdx_brf_view input[type="radio"]:not(:checked) + span:hover {
+    background: var(--c-surface);
+    color: var(--c-text);
+}
+
 .glass-card .card-title {
   font-size: 0.68rem;
   font-weight: 600;
@@ -1071,3 +1112,38 @@ body.light-mode .bys-banner {
 .stats-row.bys2-stats-row,
 .stats-row.bys3-stats-row { flex-wrap: wrap; gap: 6px; }
 
+/* ── Base Rate Fallacy — inner nav tabs inside glass-card ────────────── */
+.glass-card > .nav-underline {
+  padding: 0 6px;
+  gap: 8px;
+  border-bottom: 1px solid var(--c-border);
+  flex-shrink: 0;
+}
+.glass-card > .nav-underline .nav-link {
+  color: var(--c-text2);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 6px 4px;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.glass-card > .nav-underline .nav-link:hover {
+  color: var(--c-text);
+}
+.glass-card > .nav-underline .nav-link.active {
+  color: #38bdf8;
+  border-bottom-color: #38bdf8;
+}
+/* Ensure tab content inside glass-card fills remaining space */
+.glass-card > .tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.glass-card > .tab-content > .tab-pane {
+  height: 100%;
+  padding: 4px;
+}
+
+/* ── Paradox Explorer — formulas card MathJax ──────────────────────── */
+.pdx-sidebar .formulas-card .MathJax { font-size: 0.9em !important; }

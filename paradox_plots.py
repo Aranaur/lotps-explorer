@@ -20,9 +20,20 @@ _C_NN_HIST  = "#a78bfa"   # violet — NN distance histogram
 _C_NN_THEO  = "#34d399"   # green  — theoretical NN curve
 _C_GOLD     = "#fbbf24"   # gold   — annotations
 
+# Simpson's Paradox — group palette (up to 6 groups)
+_GROUP_COLORS = [
+    "#38bdf8",  # cyan
+    "#f97316",  # orange
+    "#a78bfa",  # violet
+    "#34d399",  # green
+    "#f87171",  # red
+    "#fbbf24",  # gold
+]
+_C_OVERALL = "#ef4444"    # bright red — overall trendline
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 1.  Main 2D scatter plot
+# 1.  Main 2D scatter plot  (Clustering Illusion)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def draw_cluster_scatter(x, y, n_points, title,
@@ -110,7 +121,7 @@ def draw_quadrat_chart(x, y, grid_k=5, dark=True):
         x=bins, y=expected, mode="lines+markers",
         line=dict(color=_C_EXPECTED, width=2.5),
         marker=dict(color=_C_EXPECTED, size=6),
-        name=f"Poisson(λ={lam:.1f})",
+        name=f"Poisson(\u03bb={lam:.1f})",
     ))
 
     # CSR test: χ² of observed vs Poisson
@@ -132,7 +143,7 @@ def draw_quadrat_chart(x, y, grid_k=5, dark=True):
         verdict = "consistent with CSR" if p_val > 0.05 else "departs from CSR"
         fig.add_annotation(
             x=0.98, y=0.98, xref="paper", yref="paper",
-            text=f"χ²={chi2:.1f}, p={p_val:.3f}<br><i>{verdict}</i>",
+            text=f"\u03c7\u00b2={chi2:.1f}, p={p_val:.3f}<br><i>{verdict}</i>",
             showarrow=False,
             font=dict(size=10, color=th["label"]),
             xanchor="right", yanchor="top",
@@ -203,7 +214,7 @@ def draw_nn_distance(x, y, n_points, dark=True):
 
     fig.add_annotation(
         x=0.98, y=0.98, xref="paper", yref="paper",
-        text=(f"Clark–Evans R = {R:.3f}<br>"
+        text=(f"Clark\u2013Evans R = {R:.3f}<br>"
               f"z = {z:.2f}, p = {p_ce:.3f}<br>"
               f"<i>Pattern: {pattern}</i>"),
         showarrow=False,
@@ -219,5 +230,109 @@ def draw_nn_distance(x, y, n_points, dark=True):
         yaxis_title="Density",
         showlegend=True,
         legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top"),
+    )
+    return fig
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4.  Simpson's Paradox — scatter plot
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def generate_simpsons_data(n_per_group, k_groups, noise, rng=None):
+    """Generate synthetic Simpson's Paradox data.
+
+    Each group has a *positive* within-group slope, but the group centres
+    are arranged so that the overall (pooled) slope is *negative*.
+
+    Returns
+    -------
+    x, y : 1-D arrays
+    group : 1-D int array  (0 … k-1)
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # Group centres: ascending x, descending y → negative overall slope
+    cx = np.linspace(2, 8, k_groups)
+    cy = np.linspace(8, 2, k_groups)
+
+    within_slope = 0.6  # positive slope inside each group
+
+    xs, ys, gs = [], [], []
+    for g in range(k_groups):
+        x_g = rng.normal(cx[g], 1.0, n_per_group)
+        # y = cy + slope * (x - cx) + noise
+        y_g = cy[g] + within_slope * (x_g - cx[g]) + rng.normal(0, noise, n_per_group)
+        xs.append(x_g)
+        ys.append(y_g)
+        gs.append(np.full(n_per_group, g, dtype=int))
+
+    return np.concatenate(xs), np.concatenate(ys), np.concatenate(gs)
+
+
+def draw_simpsons_scatter(x, y, group, show_groups=False,
+                          show_trends=False, dark=True):
+    """Interactive scatter for Simpson's Paradox."""
+    fig = _base_fig(dark, height=None,
+                    margin=dict(l=48, r=16, t=32, b=40))
+    th = _theme(dark)
+    k = int(group.max()) + 1
+
+    if show_groups:
+        # Colour-coded by group
+        for g in range(k):
+            mask = group == g
+            col = _GROUP_COLORS[g % len(_GROUP_COLORS)]
+            fig.add_trace(go.Scatter(
+                x=x[mask], y=y[mask], mode="markers",
+                marker=dict(color=col, size=6, opacity=0.6,
+                            line=dict(width=0)),
+                name=f"Group {g + 1}",
+                hovertemplate=(f"Group {g + 1}<br>"
+                               "x=%{x:.2f}<br>y=%{y:.2f}<extra></extra>"),
+            ))
+
+            # Per-group trendline
+            if show_trends:
+                xg, yg = x[mask], y[mask]
+                slope, intercept = np.polyfit(xg, yg, 1)
+                x_line = np.array([xg.min(), xg.max()])
+                fig.add_trace(go.Scatter(
+                    x=x_line, y=intercept + slope * x_line, mode="lines",
+                    line=dict(color=col, width=2.5),
+                    name=f"Group {g + 1} trend (\u03b2={slope:+.2f})",
+                    showlegend=True,
+                ))
+    else:
+        # Single colour — confound hidden
+        muted_col = "#94a3b8" if dark else "#64748b"
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode="markers",
+            marker=dict(color=muted_col, size=6, opacity=0.55,
+                        line=dict(width=0)),
+            name="All data",
+            hovertemplate="x=%{x:.2f}<br>y=%{y:.2f}<extra></extra>",
+        ))
+
+    # Overall trendline (always drawn when trends are on)
+    if show_trends:
+        slope_all, intercept_all = np.polyfit(x, y, 1)
+        x_range = np.array([x.min(), x.max()])
+        fig.add_trace(go.Scatter(
+            x=x_range, y=intercept_all + slope_all * x_range, mode="lines",
+            line=dict(color=_C_OVERALL, width=3, dash="dash"),
+            name=f"Overall trend (\u03b2={slope_all:+.2f})",
+            showlegend=True,
+        ))
+
+    fig.update_layout(
+        xaxis_title="x",
+        yaxis_title="y",
+        showlegend=True,
+        legend=dict(
+            x=0.01, y=0.99, xanchor="left", yanchor="top",
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(size=10),
+        ),
     )
     return fig

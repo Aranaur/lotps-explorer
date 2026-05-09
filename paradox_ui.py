@@ -349,26 +349,48 @@ def _main_tab_ccp() -> ui.Tag:
         
         ui.div(
             ui.div(
-                ui.div("EXPECTED PACKS", class_="stat-label"),
+                ui.div(
+                    "EXPECTED PACKS ",
+                    tip("Exact expected number of packs (draws when B = 1) to collect "
+                        "all N unique items. Computed via inclusion–exclusion; "
+                        "equals N·Hₙ for B = 1."),
+                    class_="stat-label",
+                ),
                 ui.div(ui.output_text("pdx_ccp_exp_packs"), class_="stat-value", style="color: #10b981;"),
-                class_="stat-card"
+                class_="stat-card",
             ),
             ui.div(
-                ui.div("EXPECTED TOTAL ITEMS", class_="stat-label"),
+                ui.div(
+                    "EXPECTED TOTAL ITEMS ",
+                    tip("Total items opened on average: E[Packs] × B. "
+                        "Includes all duplicates — most of which you will have already seen."),
+                    class_="stat-label",
+                ),
                 ui.div(ui.output_text("pdx_ccp_exp_items"), class_="stat-value", style="color: #0ea5e9;"),
-                class_="stat-card"
+                class_="stat-card",
             ),
             ui.div(
-                ui.div("COST: 1st HALF vs LAST ITEM", class_="stat-label"),
+                ui.div(
+                    "1st HALF vs LAST ITEM ",
+                    tip("Left: expected packs to collect the first N/2 unique items. "
+                        "Right: expected packs when only 1 item remains (always N/B). "
+                        "Comparing them reveals how steeply the cost grows near the end."),
+                    class_="stat-label",
+                ),
                 ui.div(ui.output_text("pdx_ccp_cost_cmp"), class_="stat-value", style="color: #f59e0b; font-size: 1.5rem;"),
-                class_="stat-card"
+                class_="stat-card",
             ),
             ui.div(
-                ui.div("TOTAL COST", class_="stat-label"),
+                ui.div(
+                    "TOTAL COST ",
+                    tip("Expected total spend: E[Packs] × cost per pack. "
+                        "Set a non-zero cost per pack in the sidebar to activate."),
+                    class_="stat-label",
+                ),
                 ui.div(ui.output_text("pdx_ccp_total_cost"), class_="stat-value", style="color: #ef4444;"),
-                class_="stat-card"
+                class_="stat-card",
             ),
-            class_="stats-row"
+            class_="stats-row",
         ),
 
         ui.div(

@@ -1,10 +1,15 @@
-# =============================================================================
+﻿# =============================================================================
 # Paradox Explorer — server logic
 #
 #   Tab 1  Base Rate Fallacy     (pdx_brf_*)
 #   Tab 2  Clustering Illusion   (pdx_clust_*)
 #   Tab 3  Simpson's Paradox     (pdx_simp_*)
+#   Tab 4  Coupon Collector       (pdx_ccp_*)
 # =============================================================================
+
+import math
+import random
+from fractions import Fraction
 
 import numpy as np
 from shiny import reactive, render, ui
@@ -13,7 +18,8 @@ from utils import tip
 from paradox_plots import (
     draw_cluster_scatter, draw_quadrat_chart, draw_nn_distance,
     generate_simpsons_data, draw_simpsons_scatter,
-    draw_baserate_sankey, draw_baserate_waffle
+    draw_baserate_sankey, draw_baserate_waffle,
+    draw_ccp_curve, draw_ccp_distribution, draw_ccp_cdf,
 )
 from theme import fig_to_ui
 
@@ -468,4 +474,296 @@ def paradox_server(input, output, session, is_dark):
         except Exception: show_t = False
 
         fig = draw_simpsons_scatter(x, y, g, show_groups=show_g, show_trends=show_t, dark=is_dark())
+        return fig_to_ui(fig)
+
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  TAB 4 — Coupon Collector's Problem
+    # ═════════════════════════════════════════════════════════════════════════
+
+    _ccp_active_preset = reactive.value("none")
+
+    @reactive.effect
+    @reactive.event(input.pdx_ccp_pre_d6)
+    def _ccp_pre_d6():
+        ui.update_slider("pdx_ccp_n", value=6)
+        ui.update_slider("pdx_ccp_b", value=1)
+        _ccp_active_preset.set("d6")
+
+    @reactive.effect
+    @reactive.event(input.pdx_ccp_pre_d20)
+    def _ccp_pre_d20():
+        ui.update_slider("pdx_ccp_n", value=20)
+        ui.update_slider("pdx_ccp_b", value=1)
+        _ccp_active_preset.set("d20")
+
+    @reactive.effect
+    @reactive.event(input.pdx_ccp_pre_mtg_c)
+    def _ccp_pre_mtg():
+        ui.update_slider("pdx_ccp_n", value=101)
+        ui.update_slider("pdx_ccp_b", value=10)
+        _ccp_active_preset.set("mtg")
+
+    @reactive.effect
+    @reactive.event(input.pdx_ccp_pre_poke)
+    def _ccp_pre_poke():
+        ui.update_slider("pdx_ccp_n", value=151)
+        ui.update_slider("pdx_ccp_b", value=11)
+        _ccp_active_preset.set("poke")
+
+    # ── Guard: clamp B ≤ N dynamically ──────────────────────────────────
+    @reactive.effect
+    @reactive.event(input.pdx_ccp_n)
+    def _ccp_clamp_b():
+        N = input.pdx_ccp_n()
+        ui.update_slider("pdx_ccp_b", max=N)
+
+    @render.ui
+    def pdx_ccp_preset_desc():
+        p = _ccp_active_preset()
+        if p == "none":
+            return ui.div(
+                "← Select an example to auto-fill the values.",
+                class_="np-preset-hint",
+            )
+        elif p == "d6":
+            return ui.div(
+                ui.tags.strong("D6 Dice: "),
+                "Rolling a standard 6-sided die until you see all 6 faces.",
+                class_="np-preset-hint np-preset-hint--active"
+            )
+        elif p == "d20":
+            return ui.div(
+                ui.tags.strong("D20 Set: "),
+                "Rolling a 20-sided die until you've hit every single number from 1 to 20.",
+                class_="np-preset-hint np-preset-hint--active"
+            )
+        elif p == "mtg":
+            return ui.div(
+                ui.tags.strong("MtG Common Set: "),
+                "Collecting a 101-card common set by opening Draft Boosters (10 distinct commons each).",
+                class_="np-preset-hint np-preset-hint--active"
+            )
+        elif p == "poke":
+            return ui.div(
+                ui.tags.strong("Pokémon Gen 1: "),
+                "Collecting all 151 original Pokémon by opening 11-card booster packs.",
+                class_="np-preset-hint np-preset-hint--active"
+            )
+        return None
+
+    @render.ui
+    def pdx_ccp_formula():
+        b = input.pdx_ccp_b()
+        if b == 1:
+            math_str = (
+                f"$$\\begin{{aligned}}"
+                f"E(T) &= N \\sum_{{i=1}}^N \\frac{{1}}{{i}} = N \\cdot H_N \\\\"
+                f"&\\approx N \\ln(N) + \\gamma N + 0.5"
+                f"\\end{{aligned}}$$"
+            )
+        else:
+            math_str = (
+                f"$$\\begin{{aligned}}"
+                f"E(Packs) &= \\sum_{{j=1}}^{{N}} (-1)^{{j-1}} \\binom{{N}}{{j}} \\frac{{1}}{{1 - \\binom{{N-j}}{{B}} / \\binom{{N}}{{B}}}} \\\\"
+                f"E(Items) &= E(Packs) \\times B"
+                f"\\end{{aligned}}$$"
+            )
+        return ui.HTML(math_str)
+
+    @render.ui
+    def pdx_ccp_formula_note():
+        b = input.pdx_ccp_b()
+        if b == 1:
+            return ui.div(
+                "The harmonic sum reflects how each item gets harder to find: "
+                "the k-th unique item needs on average ",
+                ui.tags.strong("N / (N−k+1)"),
+                " draws. Early items are cheap; the last one costs N draws.",
+                style="font-size:0.72rem; color:var(--c-text3); line-height:1.45;",
+            )
+        return ui.div(
+            "Exact inclusion–exclusion over all subsets of missing items. "
+            "Each pack draws B distinct items without replacement, so "
+            "P(specific item missed) = ",
+            ui.tags.strong("(N−B)/N"),
+            " per pack.",
+            style="font-size:0.72rem; color:var(--c-text3); line-height:1.45;",
+        )
+
+    @render.ui
+    def pdx_ccp_chart_caption():
+        view = input.pdx_ccp_view()
+        N = input.pdx_ccp_n()
+        B = min(input.pdx_ccp_b(), N)
+        caption_style = (
+            "font-size:0.72rem; color:var(--c-text3); "
+            "font-style:italic; line-height:1.45; margin-bottom:4px;"
+        )
+        if view == "Simulation (Distribution)":
+            return ui.div(
+                "2 000 simulated collectors, each opening packs until the set is complete. "
+                "The histogram is ",
+                ui.tags.strong("right-skewed"),
+                ": lucky collectors finish early, but a long right tail "
+                "means many need well above E[Packs]. "
+                "Vertical line marks the exact expected value.",
+                style=caption_style,
+            )
+        elif view == "Probability Curve (CDF)":
+            return ui.div(
+                "S-curve of completion probability derived from the simulation. "
+                "The vertical line marks E[Packs]: roughly ",
+                ui.tags.strong("63 % of collectors finish by that point"),
+                " — the long right tail pulls the mean above the median. "
+                "Use this to answer “How many packs to be 90 % sure?”",
+                style=caption_style,
+            )
+        else:
+            return ui.div(
+                "Y-axis: expected packs to collect the ",
+                ui.tags.em("next"),
+                " new item, given k already in the collection. "
+                "Stays near 1 early on; shoots up near N — the last item alone needs "
+                "on average ",
+                ui.tags.strong(f"N/B = {N/B:.1f} packs"),
+                ". This exponential growth at the right is why “almost done” takes as long as the first half.",
+                style=caption_style,
+            )
+
+    @reactive.calc
+    def _ccp_expected_packs():
+        N = input.pdx_ccp_n()
+        B = min(input.pdx_ccp_b(), N)
+        if B >= N:
+            return 1.0
+
+        # Exact Expected Value using fractions to prevent overflow
+        s = Fraction(0)
+        for j in range(1, N + 1):
+            num = math.comb(N, j)
+            num_b = math.comb(N - j, B) if (N - j) >= B else 0
+            den_b = math.comb(N, B)
+            prob = Fraction(num_b, den_b)
+            if prob == 1:
+                continue
+            term = Fraction(num, 1) * Fraction(1, 1 - prob)
+            if (j - 1) % 2 == 0:
+                s += term
+            else:
+                s -= term
+        return float(s)
+        
+    @reactive.calc
+    def _ccp_expected_half():
+        """Expected packs/draws to collect the first N/2 unique items."""
+        N = input.pdx_ccp_n()
+        B = min(input.pdx_ccp_b(), N)
+        target = N // 2
+        if B >= target:
+            return 1.0
+
+        if B == 1:
+            # Exact: sum of N/(N-k) for k = 0 .. target-1
+            return sum(N / (N - k) for k in range(target))
+
+        # B > 1: use simulation average
+        return _ccp_sim_data()['avg_half']
+
+    @reactive.calc
+    def _ccp_expected_last():
+        """Expected packs to get the very last missing item.
+        P(miss one specific item) = (N-B)/N  →  E[packs] = N/B.
+        """
+        N = input.pdx_ccp_n()
+        B = min(input.pdx_ccp_b(), N)
+        return N / B
+
+    @reactive.calc
+    def _ccp_sim_data():
+        N = input.pdx_ccp_n()
+        B = min(input.pdx_ccp_b(), N)
+        C = 2000
+
+        target_half = N // 2
+
+        packs_total = np.zeros(C, dtype=int)
+        packs_half = np.zeros(C, dtype=int)
+
+        if B == 1:
+            # Vectorised geometric jumps.
+            # k = number of distinct items already collected (0 .. N-1)
+            # p(new) = (N-k)/N  →  geometric(p)
+            cumulative = np.zeros(C, dtype=int)
+            for k in range(N):
+                jumps = np.random.geometric((N - k) / N, size=C)
+                cumulative += jumps
+                if k + 1 == target_half:          # just collected the target_half-th item
+                    packs_half[:] = cumulative
+            packs_total[:] = cumulative
+        else:
+            pool = range(N)
+            for c in range(C):
+                col = set()
+                p = 0
+                got_half = 0
+                while len(col) < N:
+                    col.update(random.sample(pool, B))
+                    p += 1
+                    if len(col) >= target_half and got_half == 0:
+                        got_half = p
+                packs_total[c] = p
+                packs_half[c] = got_half
+
+        return {
+            'total_packs': packs_total,
+            'avg_half': float(np.mean(packs_half)),
+        }
+
+    @render.text
+    def pdx_ccp_exp_packs():
+        val = _ccp_expected_packs()
+        return f"{val:,.1f}"
+
+    @render.text
+    def pdx_ccp_exp_items():
+        val = _ccp_expected_packs() * input.pdx_ccp_b()
+        return f"{val:,.0f}"
+
+    @render.text
+    def pdx_ccp_cost_cmp():
+        cost = input.pdx_ccp_cost() or 0
+
+        half = _ccp_expected_half()
+        last = _ccp_expected_last()
+
+        if cost > 0:
+            return f"${half * cost:,.2f} vs ${last * cost:,.2f}"
+        return f"{half:,.1f} packs vs {last:,.1f} packs"
+
+    @render.text
+    def pdx_ccp_total_cost():
+        val = _ccp_expected_packs()
+        cost = input.pdx_ccp_cost() or 0
+        if cost <= 0:
+            return "---"
+        return f"${val * cost:,.2f}"
+
+    @render.ui
+    def pdx_ccp_chart_area():
+        view = input.pdx_ccp_view()
+        dark = is_dark()
+        N = input.pdx_ccp_n()
+        B = min(input.pdx_ccp_b(), N)
+
+        expected = _ccp_expected_packs()
+        sim_data = _ccp_sim_data()
+
+        if view == "Simulation (Distribution)":
+            fig = draw_ccp_distribution(sim_data['total_packs'], expected, dark)
+        elif view == "Probability Curve (CDF)":
+            fig = draw_ccp_cdf(sim_data['total_packs'], expected, dark)
+        else:
+            fig = draw_ccp_curve(N, B, expected, dark)
+
         return fig_to_ui(fig)

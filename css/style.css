@@ -243,13 +243,13 @@ h1.main-title {
   transition: background 0.25s, border-color 0.25s;
 }
 /* Base Rate Fallacy View Selector (Segmented Pill Control) */
-#pdx_brf_view {
+#pdx_brf_view, #pdx_ccp_view {
     display: flex;
     justify-content: center;
     margin-bottom: 16px;
     margin-top: 4px;
 }
-#pdx_brf_view .shiny-options-group {
+#pdx_brf_view .shiny-options-group, #pdx_ccp_view .shiny-options-group {
     display: flex;
     background: var(--c-input);
     border-radius: 8px;
@@ -257,13 +257,13 @@ h1.main-title {
     border: 1px solid var(--c-border);
     gap: 4px;
 }
-#pdx_brf_view .radio {
+#pdx_brf_view .radio, #pdx_ccp_view .radio {
     margin: 0;
 }
-#pdx_brf_view input[type="radio"] {
+#pdx_brf_view input[type="radio"], #pdx_ccp_view input[type="radio"] {
     display: none; /* Hide the standard radio circle */
 }
-#pdx_brf_view span {
+#pdx_brf_view span, #pdx_ccp_view span {
     padding: 6px 16px;
     border-radius: 6px;
     cursor: pointer;
@@ -273,12 +273,12 @@ h1.main-title {
     display: inline-block;
     font-size: 0.9rem;
 }
-#pdx_brf_view input[type="radio"]:checked + span {
+#pdx_brf_view input[type="radio"]:checked + span, #pdx_ccp_view input[type="radio"]:checked + span {
     background: linear-gradient(135deg, #0ea5e9, #6366f1);
     color: #fff;
     box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
-#pdx_brf_view input[type="radio"]:not(:checked) + span:hover {
+#pdx_brf_view input[type="radio"]:not(:checked) + span:hover, #pdx_ccp_view input[type="radio"]:not(:checked) + span:hover {
     background: var(--c-surface);
     color: var(--c-text);
 }

@@ -5,6 +5,7 @@
 #   Tab 1  Base Rate Fallacy     (pdx_brf_*)
 #   Tab 2  Clustering Illusion   (pdx_clust_*)
 #   Tab 3  Simpson's Paradox     (pdx_simp_*)
+#   Tab 4  Coupon Collector       (pdx_ccp_*)
 # =============================================================================
 
 from shiny import ui
@@ -279,6 +280,120 @@ def _main_tab_simp() -> ui.Tag:
     )
 
 
+
+# ── Sidebar: Tab 4 — Coupon Collector's Problem ─────────────────────────────
+
+def _sidebar_tab_ccp() -> ui.Tag:
+    return ui.div(
+        ui.div(
+            ui.tags.i(class_="info-icon"),
+            ui.tags.strong(" Misconception: "),
+            "I have 90% of the collection, so I'll finish it soon.",
+            ui.tags.br(),
+            ui.tags.strong("Reality: "),
+            "Getting the last 10% takes exactly as long as getting the first 90%.",
+            class_="info-banner-text",
+        ),
+
+        ui.tags.label(
+            "Examples",
+            style="font-weight:500; color:var(--c-text3); font-size:0.82rem; margin-bottom:2px;",
+        ),
+        ui.div(
+            ui.input_action_button("pdx_ccp_pre_d6", "D6 Dice", class_="btn-ctrl btn-preset"),
+            ui.input_action_button("pdx_ccp_pre_d20", "D20 Set", class_="btn-ctrl btn-preset"),
+            ui.input_action_button("pdx_ccp_pre_mtg_c", "MtG Common", class_="btn-ctrl btn-preset"),
+            ui.input_action_button("pdx_ccp_pre_poke", "Pokémon", class_="btn-ctrl btn-preset"),
+            class_="np-preset-grid",
+            style="grid-template-columns: 1fr 1fr;",
+        ),
+        ui.output_ui("pdx_ccp_preset_desc"),
+
+        ui.input_slider(
+            "pdx_ccp_n",
+            ui.TagList("Unique Items to Collect (N)", tip("Total number of unique items in the set.")),
+            min=2, max=300, value=20, step=1, width="100%",
+        ),
+        ui.input_slider(
+            "pdx_ccp_b",
+            ui.TagList("Booster Size (B)", tip("Number of unique items per pack/draw.")),
+            min=1, max=30, value=1, step=1, width="100%",
+        ),
+        ui.input_numeric(
+            "pdx_ccp_cost",
+            ui.TagList("Cost per pack (optional)", tip("Enter price to calculate total expected cost.")),
+            value=0, min=0, step=0.1,
+        ),
+        
+        ui.div(
+            ui.div("EXPECTED DRAWS", class_="card-title"),
+            ui.output_ui("pdx_ccp_formula"),
+            ui.div(
+                ui.output_ui("pdx_ccp_formula_note"),
+                style="text-align:left; margin-top:6px;",
+            ),
+            class_="glass-card formulas-card",
+            style="margin-bottom: 8px; text-align: center; overflow-x: auto;",
+        ),
+
+        class_="pdx-sidebar-group",
+        **{"data-pdx-tab": "ccp"},
+    )
+
+
+# ── Main: Tab 4 — Coupon Collector's Problem ────────────────────────────────
+
+def _main_tab_ccp() -> ui.Tag:
+    return ui.nav_panel(
+        "Coupon Collector",
+        
+        ui.div(
+            ui.div(
+                ui.div("EXPECTED PACKS", class_="stat-label"),
+                ui.div(ui.output_text("pdx_ccp_exp_packs"), class_="stat-value", style="color: #10b981;"),
+                class_="stat-card"
+            ),
+            ui.div(
+                ui.div("EXPECTED TOTAL ITEMS", class_="stat-label"),
+                ui.div(ui.output_text("pdx_ccp_exp_items"), class_="stat-value", style="color: #0ea5e9;"),
+                class_="stat-card"
+            ),
+            ui.div(
+                ui.div("COST: 1st HALF vs LAST ITEM", class_="stat-label"),
+                ui.div(ui.output_text("pdx_ccp_cost_cmp"), class_="stat-value", style="color: #f59e0b; font-size: 1.5rem;"),
+                class_="stat-card"
+            ),
+            ui.div(
+                ui.div("TOTAL COST", class_="stat-label"),
+                ui.div(ui.output_text("pdx_ccp_total_cost"), class_="stat-value", style="color: #ef4444;"),
+                class_="stat-card"
+            ),
+            class_="stats-row"
+        ),
+
+        ui.div(
+            ui.div(
+                ui.input_radio_buttons(
+                    "pdx_ccp_view", "",
+                    choices=["Hockey-stick Curve", "Simulation (Distribution)", "Probability Curve (CDF)"],
+                    inline=True
+                ),
+                id="pdx_ccp_view_container"
+            ),
+            ui.div(
+                ui.output_ui("pdx_ccp_chart_caption"),
+                style="padding: 0 12px;",
+            ),
+            ui.div(
+                ui.output_ui("pdx_ccp_chart_area"),
+                style="flex: 1; min-height: 420px; position: relative; z-index: 1;"
+            ),
+            class_="glass-card",
+            style="flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding-top: 12px;",
+        ),
+    )
+
+
 # ── JS: toggle sidebar group visibility based on active sub-tab ─────────────
 
 _PDX_TAB_SCRIPT = ui.tags.script("""
@@ -287,6 +402,7 @@ _PDX_TAB_SCRIPT = ui.tags.script("""
             if (label.indexOf('Base Rate') !== -1) return 'brf';
             if (label.indexOf('Clustering') !== -1) return 'clust';
             if (label.indexOf('Simpson')    !== -1) return 'simp';
+            if (label.indexOf('Coupon')     !== -1) return 'ccp';
             return 'brf';
         }
         function sync(active) {
@@ -314,7 +430,7 @@ _PDX_TAB_SCRIPT = ui.tags.script("""
         // Re-typeset MathJax whenever Shiny updates the formula output
         if (window.jQuery) {
             $(document).on('shiny:value', function(event) {
-                if (event.name === 'pdx_brf_formula') {
+                if (event.name === 'pdx_brf_formula' || event.name === 'pdx_ccp_formula') {
                     setTimeout(function() {
                         if (window.MathJax && MathJax.typesetPromise) {
                             MathJax.typesetPromise();
@@ -357,6 +473,7 @@ def paradox_panel() -> ui.Tag:
                 _sidebar_tab_brf(),
                 _sidebar_tab_clust(),
                 _sidebar_tab_simp(),
+                _sidebar_tab_ccp(),
 
                 ui.div(
                     ui.tags.a("LinkedIn",
@@ -380,6 +497,7 @@ def paradox_panel() -> ui.Tag:
                     _main_tab_brf(),
                     _main_tab_clust(),
                     _main_tab_simp(),
+                    _main_tab_ccp(),
                     id="pdx_subtabs",
                 ),
                 class_="main-panel",

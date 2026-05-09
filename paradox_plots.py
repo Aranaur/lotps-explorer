@@ -486,3 +486,138 @@ def draw_baserate_waffle(tp, fp, fn, tn, dark=True):
         paper_bgcolor="rgba(0,0,0,0)",
     )
     return fig
+
+
+# ── Coupon Collector's Problem ───────────────────────────────────────────────
+
+def draw_ccp_curve(N, B, expected_packs, dark=True):
+    """Hockey-stick: expected packs to collect the k-th unique item.
+
+    P(pack has ≥1 new | k collected) = 1 − C(k,B)/C(N,B)
+    Computed via log-ratio to avoid huge integer overflow for large N,B.
+    """
+    fig = _base_fig(dark, height=None, margin=dict(l=52, r=16, t=24, b=40))
+    th = _theme(dark)
+
+    ks = np.arange(0, N)  # k items already collected; seeking (k+1)-th
+
+    # log C(k,B)/C(N,B) = sum_{i=0}^{B-1} log(k-i) - log(N-i)  [only for k >= B]
+    log_ratio = np.full(N, -np.inf)  # log(0) for k < B
+    for k in range(B, N):
+        lr = 0.0
+        for i in range(B):
+            lr += np.log(k - i) - np.log(N - i)
+        log_ratio[k] = lr
+
+    p_new = 1.0 - np.exp(log_ratio)
+    p_new = np.clip(p_new, 1e-12, 1.0)
+    marginal = 1.0 / p_new  # expected packs to get the next new item
+
+    # Cumulative: expected total packs to collect exactly k items
+    cumulative = np.cumsum(marginal)
+
+    # Shade area under marginal curve
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([[1], ks[1:] + 1, [N]]),
+        y=np.concatenate([[marginal[0]], marginal[1:], [marginal[-1]]]),
+        mode="none",
+        fill="tozeroy",
+        fillcolor="rgba(14,165,233,0.08)",
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scatter(
+        x=ks + 1,
+        y=marginal,
+        mode="lines",
+        line=dict(color="#0ea5e9", width=2.5),
+        name="Packs per new item",
+        hovertemplate="Item #%{x}<br>Expected packs: %{y:.2f}<extra></extra>",
+    ))
+
+    # Mark N/2 — halfway point
+    half = N // 2
+    fig.add_vline(
+        x=half, line_dash="dash", line_color="#10b981", opacity=0.6,
+        annotation_text=f"50% ({marginal[half - 1]:.1f} packs/item)",
+        annotation_position="top left",
+        annotation_font_color="#10b981",
+        annotation_font_size=10,
+    )
+
+    # Mark last item cost = N/B
+    last_cost = N / B
+    fig.add_annotation(
+        x=N, y=marginal[-1],
+        text=f"Last item: {last_cost:.1f} packs",
+        showarrow=True, arrowhead=2, arrowcolor="#f59e0b",
+        font=dict(size=10, color="#f59e0b"),
+        xanchor="right", yanchor="bottom",
+        ax=-40, ay=-30,
+    )
+
+    fig.update_layout(
+        xaxis_title="Unique items collected",
+        yaxis_title="Expected packs to get next item",
+        showlegend=False,
+    )
+    return fig
+
+
+def draw_ccp_distribution(sim_results, expected_packs, dark=True):
+    fig = _base_fig(dark, height=None)
+    th = _theme(dark)
+    
+    fig.add_trace(go.Histogram(
+        x=sim_results,
+        nbinsx=50,
+        marker_color="#10b981",
+        name="Simulated Packs",
+        hovertemplate="Packs: %{x}<br>Frequency: %{y}<extra></extra>"
+    ))
+    
+    fig.add_vline(
+        x=expected_packs, line_dash="dash", line_color="#f59e0b", line_width=2,
+        annotation_text=f"Mean: {expected_packs:.1f}", annotation_position="top right",
+        annotation_font_color="#f59e0b"
+    )
+    
+    fig.update_layout(
+        xaxis_title="Total Packs to Complete Set",
+        yaxis_title="Number of Collectors",
+        showlegend=False,
+        bargap=0.05
+    )
+    return fig
+
+
+def draw_ccp_cdf(sim_results, expected_packs, dark=True):
+    fig = _base_fig(dark, height=None)
+    th = _theme(dark)
+    
+    # Calculate ECDF
+    x = np.sort(sim_results)
+    y = np.arange(1, len(x) + 1) / len(x)
+    
+    fig.add_trace(go.Scatter(
+        x=x, y=y,
+        mode="lines",
+        line=dict(color="#a855f7", width=3),
+        name="Probability",
+        hovertemplate="Packs: %{x}<br>Probability: %{y:.1%}<extra></extra>"
+    ))
+    
+    fig.add_vline(
+        x=expected_packs, line_dash="dash", line_color="#f59e0b", line_width=2,
+        annotation_text=f"E[Packs] = {expected_packs:.1f}",
+        annotation_position="bottom right",
+        annotation_font_color="#f59e0b",
+    )
+    
+    fig.update_layout(
+        xaxis_title="Total Packs to Complete Set",
+        yaxis_title="Cumulative Probability",
+        yaxis_tickformat=".0%",
+        showlegend=False,
+    )
+    return fig

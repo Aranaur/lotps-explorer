@@ -4,6 +4,7 @@
 
 import numpy as np
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from scipy import stats
 from scipy.spatial import cKDTree
 
@@ -619,5 +620,301 @@ def draw_ccp_cdf(sim_results, expected_packs, dark=True):
         yaxis_title="Cumulative Probability",
         yaxis_tickformat=".0%",
         showlegend=False,
+    )
+    return fig
+
+
+# ── Gambler's Fallacy ───────────────────────────────────────────────────────
+
+_C_SUCCESS  = "#10b981"   # green  — successes
+_C_FAIL     = "#ef4444"   # red    — failures
+_C_STREAK   = "#f59e0b"   # amber  — highlighted streak
+_C_FALLACY  = "#a855f7"   # violet — gambler's (wrong) belief
+
+
+def _find_streaks(flips, k):
+    """Return list of (start, end) for maximal runs of 1s with length >= k.
+    Indices are 0-based, end is exclusive (Python slice convention)."""
+    arr = np.asarray(flips, dtype=int)
+    if arr.size == 0:
+        return []
+    padded = np.concatenate([[0], arr, [0]])
+    diffs = np.diff(padded)
+    starts = np.where(diffs == 1)[0]
+    ends = np.where(diffs == -1)[0]
+    return [(int(s), int(e)) for s, e in zip(starts, ends) if (e - s) >= k]
+
+
+def draw_gf_sequence(flips, p, k, dark=True):
+    """Single run as barcode strip + running proportion (LLN view)."""
+    th = _theme(dark)
+    flips = np.asarray(flips, dtype=int)
+    n = int(len(flips))
+    xs = np.arange(1, n + 1)
+    running = np.cumsum(flips) / xs
+
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.85, 0.15],
+        vertical_spacing=0.04,
+    )
+
+    # Top: running proportion line
+    fig.add_trace(go.Scatter(
+        x=xs, y=running, mode="lines",
+        line=dict(color="#0ea5e9", width=2),
+        name="Running proportion",
+        hovertemplate="Flip %{x}<br>Running prop: %{y:.3f}<extra></extra>",
+    ), row=1, col=1)
+
+    # True p reference line on top subplot
+    fig.add_hline(
+        y=p, line_dash="dash", line_color=_C_FAIL, opacity=0.7,
+        annotation_text=f"True p = {p:.3f}",
+        annotation_position="top left",
+        annotation_font_color=_C_FAIL,
+        annotation_font_size=10,
+        row=1, col=1,
+    )
+
+    # Bottom: 1D barcode heatmap
+    fig.add_trace(go.Heatmap(
+        z=[flips], x=xs,
+        colorscale=[[0, _C_FAIL], [1, _C_SUCCESS]],
+        showscale=False, zmin=0, zmax=1,
+        xgap=0, ygap=0,
+        hovertemplate="Flip %{x}: %{z}<extra></extra>",
+    ), row=2, col=1)
+
+    # Streak highlights — span both rows via yref="paper"
+    streaks = _find_streaks(flips, k)
+    for s, e in streaks:
+        fig.add_shape(
+            type="rect",
+            x0=s + 0.5, x1=e + 0.5,
+            y0=0, y1=1,
+            xref="x", yref="paper",
+            fillcolor=_C_STREAK, opacity=0.18,
+            layer="below", line_width=0,
+        )
+
+    # Annotation: arrow at last streak
+    if streaks:
+        last_s, last_e = streaks[-1]
+        midx = (last_s + last_e) / 2 + 0.5
+        run_height = float(running[min(last_e - 1, n - 1)])
+        fig.add_annotation(
+            x=midx, y=run_height,
+            xref="x", yref="y",
+            text=f"streak of {last_e - last_s}",
+            showarrow=True, arrowhead=2, arrowcolor=_C_STREAK,
+            font=dict(size=10, color=_C_STREAK),
+            ax=0, ay=-30,
+        )
+
+    # Final-proportion text
+    fig.add_annotation(
+        x=0.99, y=1.05, xref="paper", yref="paper",
+        text=f"Final proportion: {running[-1]:.3f}  ·  True p: {p:.3f}",
+        showarrow=False,
+        font=dict(size=10, color=th["label"]),
+        xanchor="right", yanchor="bottom",
+    )
+
+    # Apply shared theme manually (make_subplots bypasses _base_fig)
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Inter, sans-serif", color=th["label"], size=11),
+        margin=dict(l=48, r=16, t=28, b=40),
+        showlegend=False, dragmode=False,
+    )
+    fig.update_xaxes(
+        gridcolor=th["grid"], linecolor=th["grid"],
+        tickfont=dict(size=10, color=th["axis"]),
+        zeroline=False, row=1, col=1,
+    )
+    fig.update_xaxes(
+        gridcolor=th["grid"], linecolor=th["grid"],
+        tickfont=dict(size=10, color=th["axis"]),
+        zeroline=False, title_text="Flip number",
+        row=2, col=1,
+    )
+    fig.update_yaxes(
+        gridcolor=th["grid"], linecolor=th["grid"],
+        tickfont=dict(size=10, color=th["axis"]),
+        zeroline=False, title_text="Running proportion",
+        range=[0, 1], row=1, col=1,
+    )
+    fig.update_yaxes(
+        showgrid=False, showticklabels=False, zeroline=False,
+        range=[-0.5, 0.5], row=2, col=1,
+    )
+    return fig
+
+
+def draw_gf_after_k(after_k, p, k_target, dark=True):
+    """Bar chart of P(next | last >= k) — opacity scales with sample size."""
+    fig = _base_fig(dark, height=None,
+                    margin=dict(l=52, r=16, t=24, b=44))
+    th = _theme(dark)
+
+    if not after_k:
+        fig.add_annotation(
+            x=0.5, y=0.5, xref="paper", yref="paper",
+            text="No data — increase n or decrease p",
+            showarrow=False, font=dict(size=12, color=th["label"]),
+        )
+        return fig
+
+    ks = sorted(after_k.keys())
+    ns = np.array([len(after_k[kk]) for kk in ks], dtype=int)
+    n_max = int(ns.max()) if (ns.size and ns.max() > 0) else 1
+
+    bars_x, bars_y, bars_err, bars_op = [], [], [], []
+    bars_line_color, bars_line_width = [], []
+    hover_text, na_x = [], []
+
+    for kk in ks:
+        arr = after_k[kk]
+        n = int(len(arr))
+        if n == 0:
+            bars_x.append(kk); bars_y.append(p); bars_err.append(0)
+            bars_op.append(0.10)
+            bars_line_color.append("rgba(120,120,120,0.4)")
+            bars_line_width.append(0.5)
+            hover_text.append(f"k={kk}: no data")
+            na_x.append(kk)
+            continue
+        bars_x.append(kk)
+        bars_y.append(float(arr.mean()))
+        bars_err.append(2.0 * float(np.sqrt(p * (1 - p) / n)))
+        bars_op.append(0.30 + 0.70 * (n / n_max))
+        if kk == k_target:
+            bars_line_color.append(_C_STREAK)
+            bars_line_width.append(2.5)
+        else:
+            bars_line_color.append("rgba(0,0,0,0)")
+            bars_line_width.append(0)
+        hover_text.append(
+            f"k={kk} · n={n} cases · mean={arr.mean():.3f}"
+        )
+
+    fig.add_trace(go.Bar(
+        x=bars_x, y=bars_y,
+        error_y=dict(type="data", array=bars_err,
+                     color=th["label"], width=4, thickness=1.2),
+        marker=dict(
+            color=_C_SUCCESS,
+            opacity=bars_op,
+            line=dict(color=bars_line_color, width=bars_line_width),
+        ),
+        hovertext=hover_text,
+        hovertemplate="%{hovertext}<extra></extra>",
+        showlegend=False,
+    ))
+
+    # ±2 SE band around p (uses average n of non-empty bars)
+    nonzero = ns[ns > 0]
+    if nonzero.size:
+        avg_n = float(nonzero.mean())
+        se_band = 2.0 * float(np.sqrt(p * (1 - p) / avg_n))
+        fig.add_hrect(
+            y0=max(0.0, p - se_band), y1=min(1.0, p + se_band),
+            fillcolor=_C_FAIL, opacity=0.10,
+            layer="below", line_width=0,
+        )
+
+    # True-p reference line
+    fig.add_hline(
+        y=p, line_dash="dash", line_color=_C_FAIL, opacity=0.85,
+        annotation_text=f"True p = {p:.3f}",
+        annotation_position="top left",
+        annotation_font_color=_C_FAIL,
+        annotation_font_size=10,
+    )
+
+    # N/A annotations
+    for kk in na_x:
+        fig.add_annotation(
+            x=kk, y=0.04, xref="x", yref="paper",
+            text="N/A", showarrow=False,
+            font=dict(size=9, color=th["axis"]),
+        )
+
+    fig.update_layout(
+        xaxis=dict(title="Streak length k (last k or more were successes)",
+                   dtick=1, range=[0.5, max(ks) + 0.5]),
+        yaxis=dict(title="P(next success | last ≥ k)",
+                   range=[0, 1]),
+        showlegend=False, bargap=0.25,
+    )
+    return fig
+
+
+def draw_gf_streaks(max_streaks, p, n_flips, dark=True):
+    """Histogram of longest streak per simulation."""
+    fig = _base_fig(dark, height=None,
+                    margin=dict(l=52, r=16, t=24, b=44))
+    th = _theme(dark)
+
+    if len(max_streaks) == 0:
+        return fig
+
+    if 0 < p < 1 and n_flips > 1:
+        expected = max(1, int(np.log(n_flips * (1 - p)) / np.log(1 / p)))
+    else:
+        expected = 1
+
+    max_val = int(max_streaks.max())
+    fig.add_trace(go.Histogram(
+        x=max_streaks,
+        xbins=dict(start=-0.5, end=max_val + 0.5, size=1),
+        marker_color=_C_FALLACY, opacity=0.78,
+        marker_line=dict(color=th["annot_border"], width=0.5),
+        hovertemplate="Longest streak: %{x}<br>Sims: %{y}<extra></extra>",
+        showlegend=False,
+    ))
+
+    # Theoretical expectation line
+    fig.add_vline(
+        x=expected, line_dash="dash", line_color=_C_STREAK, line_width=2,
+        annotation_text=f"E[L_n] ≈ {expected}",
+        annotation_position="top right",
+        annotation_font_color=_C_STREAK,
+    )
+
+    # 5th–95th percentile range
+    p5 = int(np.percentile(max_streaks, 5))
+    p95 = int(np.percentile(max_streaks, 95))
+    if p5 < p95:
+        fig.add_vline(x=p5, line_dash="dot", line_color=th["axis"], opacity=0.5)
+        fig.add_vline(x=p95, line_dash="dot", line_color=th["axis"], opacity=0.5)
+
+    p10_threshold = int(np.percentile(max_streaks, 10))
+    pct_above = int(round((max_streaks >= p10_threshold).mean() * 100))
+
+    annot_text = (
+        f"In {n_flips} flips · p = {p:.3f}<br>"
+        f"Expected longest ≈ {expected}<br>"
+        f"5th–95th percentile: [{p5}, {p95}]<br>"
+        f"{pct_above}% of runs had streak ≥ {p10_threshold}"
+    )
+    fig.add_annotation(
+        x=0.98, y=0.98, xref="paper", yref="paper",
+        text=annot_text, showarrow=False,
+        font=dict(size=10, color=th["label"]),
+        xanchor="right", yanchor="top",
+        bgcolor=th["annot_bg"],
+        bordercolor=th["annot_border"],
+        borderwidth=1, borderpad=6,
+        align="left",
+    )
+
+    fig.update_layout(
+        xaxis=dict(title="Longest streak of successes per run",
+                   dtick=max(1, max_val // 12)),
+        yaxis=dict(title="Number of simulations"),
+        showlegend=False, bargap=0.05,
     )
     return fig

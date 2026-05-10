@@ -341,6 +341,182 @@ def _sidebar_tab_ccp() -> ui.Tag:
     )
 
 
+# ── Sidebar: Tab 5 — Gambler's Fallacy ──────────────────────────────────────
+
+def _sidebar_tab_gf() -> ui.Tag:
+    return ui.div(
+        # Misconception banner
+        ui.div(
+            ui.tags.i(class_="info-icon"),
+            ui.tags.strong(" Misconception: "),
+            "After 5 heads in a row, tails is “due” — "
+            "the coin must balance itself out.",
+            ui.tags.br(),
+            ui.tags.strong("Reality: "),
+            "Each flip is independent. The coin has no memory. ",
+            "P(heads | last 5 heads) = P(heads) = p, always.",
+            ui.tags.br(),
+            ui.tags.em(
+                "The opposite error — “I’m on a roll!” "
+                "— is the Hot Hand Fallacy."
+            ),
+            class_="info-banner-text",
+        ),
+
+        # Presets
+        ui.tags.label(
+            "Examples",
+            style="font-weight:500; color:var(--c-text3); font-size:0.82rem; margin-bottom:2px;",
+        ),
+        ui.div(
+            ui.input_action_button("pdx_gf_pre_coin", "Fair Coin",
+                                   class_="btn-ctrl btn-preset"),
+            ui.input_action_button("pdx_gf_pre_roulette", "Roulette",
+                                   class_="btn-ctrl btn-preset"),
+            ui.input_action_button("pdx_gf_pre_mc1913", "Monte Carlo 1913",
+                                   class_="btn-ctrl btn-preset"),
+            ui.input_action_button("pdx_gf_pre_ft", "Free Throws",
+                                   class_="btn-ctrl btn-preset"),
+            class_="np-preset-grid",
+            style="grid-template-columns: 1fr 1fr;",
+        ),
+        ui.output_ui("pdx_gf_preset_desc"),
+
+        # Sliders
+        ui.input_slider(
+            "pdx_gf_p",
+            ui.TagList(
+                "P(success) — p",
+                tip("Probability of success on each independent trial."),
+            ),
+            min=0.01, max=0.99, value=0.50, step=0.01, width="100%",
+        ),
+        ui.input_slider(
+            "pdx_gf_k",
+            ui.TagList(
+                "Streak length to analyse (k)",
+                tip("The bar chart shows P(next = success | last ≥ k were successes). "
+                    "Independence means this always equals p."),
+            ),
+            min=1, max=10, value=3, step=1, width="100%",
+        ),
+        ui.input_slider(
+            "pdx_gf_n",
+            ui.TagList(
+                "Flips per run (n)",
+                tip("Longer runs produce more stable estimates and longer "
+                    "expected maximum streaks."),
+            ),
+            min=50, max=2000, value=300, step=50, width="100%",
+        ),
+
+        # Resimulate button
+        ui.div(
+            ui.input_action_button(
+                "pdx_gf_btn_resim", "↻  Resimulate",
+                class_="btn-ctrl btn-sample btn-full",
+            ),
+            class_="sidebar-btn-row",
+        ),
+
+        # Formula card
+        ui.div(
+            ui.div("INDEPENDENCE & STREAKS", class_="card-title"),
+            ui.output_ui("pdx_gf_formula"),
+            ui.div(
+                ui.output_ui("pdx_gf_formula_note"),
+                style="text-align:left; margin-top:6px;",
+            ),
+            class_="glass-card formulas-card",
+            style="margin-bottom: 8px; text-align: center; overflow-x: auto;",
+        ),
+
+        class_="pdx-sidebar-group",
+        **{"data-pdx-tab": "gf"},
+    )
+
+
+# ── Main: Tab 5 — Gambler's Fallacy ─────────────────────────────────────────
+
+def _main_tab_gf() -> ui.Tag:
+    return ui.nav_panel(
+        "Gambler’s Fallacy",
+
+        ui.div(
+            ui.div(
+                ui.div(
+                    "P(SUCCESS) ",
+                    tip("True probability p — constant, set by slider."),
+                    class_="stat-label",
+                ),
+                ui.div(ui.output_text("pdx_gf_stat_p"), class_="stat-value",
+                       style="color: #10b981;"),
+                class_="stat-card",
+            ),
+            ui.div(
+                ui.div(
+                    "P(NEXT | LAST ≥ k) ",
+                    tip("Empirical fraction of successes that follow a streak "
+                        "of at least k successes — should always ≈ p. "
+                        "We deliberately do not require the (k+1)-th flip back "
+                        "to be a failure: by independence the extra condition "
+                        "would change nothing yet introduce edge-case noise."),
+                    class_="stat-label",
+                ),
+                ui.div(ui.output_text("pdx_gf_stat_after_k"), class_="stat-value",
+                       style="color: #0ea5e9;"),
+                class_="stat-card",
+            ),
+            ui.div(
+                ui.div(
+                    "AVG LONGEST STREAK ",
+                    tip("Mean of the longest streak observed across "
+                        "1 000 simulated runs."),
+                    class_="stat-label",
+                ),
+                ui.div(ui.output_text("pdx_gf_stat_avg_max"), class_="stat-value",
+                       style="color: #f59e0b;"),
+                class_="stat-card",
+            ),
+            ui.div(
+                ui.div(
+                    "EXPECTED LONGEST ",
+                    tip("Theoretical expected longest streak "
+                        "≈ log_{1/p}(n·(1−p))."),
+                    class_="stat-label",
+                ),
+                ui.div(ui.output_text("pdx_gf_stat_exp_max"), class_="stat-value",
+                       style="color: #a855f7;"),
+                class_="stat-card",
+            ),
+            class_="stats-row",
+        ),
+
+        ui.div(
+            ui.div(
+                ui.input_radio_buttons(
+                    "pdx_gf_view", "",
+                    choices=["Flip Sequence", "Independence Proof",
+                             "Streak Distribution"],
+                    inline=True,
+                ),
+                id="pdx_gf_view_container",
+            ),
+            ui.div(
+                ui.output_ui("pdx_gf_chart_caption"),
+                style="padding: 0 12px;",
+            ),
+            ui.div(
+                ui.output_ui("pdx_gf_chart_area"),
+                style="flex: 1; min-height: 420px; position: relative; z-index: 1;",
+            ),
+            class_="glass-card",
+            style="flex: 1; min-height: 0; overflow: hidden; display: flex; "
+                  "flex-direction: column; padding-top: 12px;",
+        ),
+    )
+
+
 # ── Main: Tab 4 — Coupon Collector's Problem ────────────────────────────────
 
 def _main_tab_ccp() -> ui.Tag:
@@ -425,6 +601,7 @@ _PDX_TAB_SCRIPT = ui.tags.script("""
             if (label.indexOf('Clustering') !== -1) return 'clust';
             if (label.indexOf('Simpson')    !== -1) return 'simp';
             if (label.indexOf('Coupon')     !== -1) return 'ccp';
+            if (label.indexOf('Gambler')    !== -1) return 'gf';
             return 'brf';
         }
         function sync(active) {
@@ -452,7 +629,7 @@ _PDX_TAB_SCRIPT = ui.tags.script("""
         // Re-typeset MathJax whenever Shiny updates the formula output
         if (window.jQuery) {
             $(document).on('shiny:value', function(event) {
-                if (event.name === 'pdx_brf_formula' || event.name === 'pdx_ccp_formula') {
+                if (event.name === 'pdx_brf_formula' || event.name === 'pdx_ccp_formula' || event.name === 'pdx_gf_formula') {
                     setTimeout(function() {
                         if (window.MathJax && MathJax.typesetPromise) {
                             MathJax.typesetPromise();
@@ -496,6 +673,7 @@ def paradox_panel() -> ui.Tag:
                 _sidebar_tab_clust(),
                 _sidebar_tab_simp(),
                 _sidebar_tab_ccp(),
+                _sidebar_tab_gf(),
 
                 ui.div(
                     ui.tags.a("LinkedIn",
@@ -520,6 +698,7 @@ def paradox_panel() -> ui.Tag:
                     _main_tab_clust(),
                     _main_tab_simp(),
                     _main_tab_ccp(),
+                    _main_tab_gf(),
                     id="pdx_subtabs",
                 ),
                 class_="main-panel",

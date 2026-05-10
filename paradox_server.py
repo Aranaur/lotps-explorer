@@ -20,8 +20,37 @@ from paradox_plots import (
     generate_simpsons_data, draw_simpsons_scatter,
     draw_baserate_sankey, draw_baserate_waffle,
     draw_ccp_curve, draw_ccp_distribution, draw_ccp_cdf,
+    draw_gf_sequence, draw_gf_after_k, draw_gf_streaks,
 )
 from theme import fig_to_ui
+
+
+# ── Gambler's Fallacy — module-level helpers ──────────────────────────────
+_GF_N_SIMS = 1_000
+
+
+def _compute_max_streaks(data):
+    """Vectorised max consecutive-1 streak per row."""
+    N, _ = data.shape
+    padded = np.concatenate(
+        [np.zeros((N, 1), int), data.astype(int), np.zeros((N, 1), int)],
+        axis=1,
+    )
+    diffs = np.diff(padded, axis=1)
+    max_s = np.zeros(N, dtype=int)
+    for i in range(N):
+        starts = np.where(diffs[i] == 1)[0]
+        ends = np.where(diffs[i] == -1)[0]
+        if len(starts):
+            max_s[i] = int((ends - starts).max())
+    return max_s
+
+
+def _expected_max_streak(p, n):
+    """E[L_n] ≈ floor(log(n*(1-p)) / log(1/p)) for p in (0,1)."""
+    if p <= 0 or p >= 1 or n < 2:
+        return 1
+    return max(1, int(np.log(n * (1 - p)) / np.log(1 / p)))
 
 
 def paradox_server(input, output, session, is_dark):
@@ -765,5 +794,222 @@ def paradox_server(input, output, session, is_dark):
             fig = draw_ccp_cdf(sim_data['total_packs'], expected, dark)
         else:
             fig = draw_ccp_curve(N, B, expected, dark)
+
+        return fig_to_ui(fig)
+
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  TAB 5 — Gambler's Fallacy
+    # ═════════════════════════════════════════════════════════════════════════
+
+    _gf_active_preset = reactive.value("none")
+
+    # ── Preset handlers ─────────────────────────────────────────────────
+    @reactive.effect
+    @reactive.event(input.pdx_gf_pre_coin)
+    def _gf_pre_coin():
+        ui.update_slider("pdx_gf_p", value=0.50)
+        ui.update_slider("pdx_gf_k", value=3)
+        ui.update_slider("pdx_gf_n", value=300)
+        _gf_active_preset.set("coin")
+
+    @reactive.effect
+    @reactive.event(input.pdx_gf_pre_roulette)
+    def _gf_pre_roulette():
+        ui.update_slider("pdx_gf_p", value=0.4865)  # 18/37, European
+        ui.update_slider("pdx_gf_k", value=5)
+        ui.update_slider("pdx_gf_n", value=500)
+        _gf_active_preset.set("roulette")
+
+    @reactive.effect
+    @reactive.event(input.pdx_gf_pre_mc1913)
+    def _gf_pre_mc1913():
+        ui.update_slider("pdx_gf_p", value=0.4865)
+        ui.update_slider("pdx_gf_k", value=10)
+        ui.update_slider("pdx_gf_n", value=1000)
+        _gf_active_preset.set("mc1913")
+
+    @reactive.effect
+    @reactive.event(input.pdx_gf_pre_ft)
+    def _gf_pre_ft():
+        ui.update_slider("pdx_gf_p", value=0.75)
+        ui.update_slider("pdx_gf_k", value=5)
+        ui.update_slider("pdx_gf_n", value=400)
+        _gf_active_preset.set("ft")
+
+    # ── Core simulation ─────────────────────────────────────────────────
+    @reactive.calc
+    def _gf_sim_data():
+        p = input.pdx_gf_p()
+        n = input.pdx_gf_n()
+        # Trigger fresh seed on resimulate-button click. We deliberately do NOT
+        # depend on pdx_gf_k — k only changes which slice/highlight is rendered.
+        input.pdx_gf_btn_resim()
+
+        rng = np.random.default_rng()
+        data = rng.binomial(1, p, (_GF_N_SIMS, n))
+
+        single = data[0]
+
+        # Streak conditioning is "AT LEAST kk" (last kk flips are all 1).
+        # By independence the empirical fraction tends to p regardless of kk.
+        # For each kk, find streaks of length kk and record the NEXT flip.
+        #   define cs0 with a leading zero so cs0[:, j] = sum(data[:, 0..j-1]);
+        #   then sum(data[:, j..j+kk-1]) = cs0[:, j+kk] - cs0[:, j].
+        # The "next flip" is data[:, j+kk]; valid j range is 0..n-kk-1 so that
+        # j+kk is an in-bounds column.
+        k_max = min(10, n - 1)
+        after_k = {}
+        cs = np.cumsum(data, axis=1)
+        cs0 = np.hstack([np.zeros((_GF_N_SIMS, 1), dtype=int), cs])  # (N, n+1)
+        for kk in range(1, k_max + 1):
+            if kk < n:
+                sums = cs0[:, kk:n] - cs0[:, :n - kk]   # shape (N_SIMS, n-kk)
+                mask = (sums == kk)                      # last kk are all 1
+                next_flips = data[:, kk:n][mask]         # data[:, j+kk]
+                after_k[kk] = next_flips     # may be empty for large kk + small n
+
+        max_streaks = _compute_max_streaks(data)
+
+        return {
+            'single': single,
+            'after_k': after_k,
+            'max_streaks': max_streaks,
+            'p': p, 'n': n,
+        }
+
+    # ── Preset description ──────────────────────────────────────────────
+    @render.ui
+    def pdx_gf_preset_desc():
+        p = _gf_active_preset()
+        if p == "none":
+            return ui.div(
+                "← Select an example to auto-fill the values.",
+                class_="np-preset-hint",
+            )
+        elif p == "coin":
+            return ui.div(
+                ui.tags.strong("Fair Coin: "),
+                "Classic 50/50. Even here, streaks of 7+ are expected in 300 flips — most people are surprised.",
+                class_="np-preset-hint np-preset-hint--active",
+            )
+        elif p == "roulette":
+            return ui.div(
+                ui.tags.strong("Roulette (Red): "),
+                "European roulette: 18 red, 18 black, 1 green. P(red) = 18/37 ≈ 48.65 %. The casino edge comes from never paying you when green hits.",
+                class_="np-preset-hint np-preset-hint--active",
+            )
+        elif p == "mc1913":
+            return ui.div(
+                ui.tags.strong("Monte Carlo 1913: "),
+                "On 18 August 1913, black came up 26 times in a row at Casino de Monte‑Carlo. Gamblers, convinced red was overdue, lost millions. After 26 blacks, the probability of red on the next spin was still 18/37 ≈ 48.6 %.",
+                class_="np-preset-hint np-preset-hint--active",
+            )
+        elif p == "ft":
+            return ui.div(
+                ui.tags.strong("Free Throws: "),
+                "Inspired by NBA studies (Gilovich, Vallone & Tversky, 1985) that found no evidence of the Hot Hand. ",
+                ui.tags.strong("This simulation hard-codes independence between shots"),
+                " — yet streaks of 5–7 makes still emerge naturally. The pattern your intuition labels “in the zone” is exactly what pure randomness produces.",
+                class_="np-preset-hint np-preset-hint--active",
+            )
+        return None
+
+    # ── Formula card ────────────────────────────────────────────────────
+    @render.ui
+    def pdx_gf_formula():
+        math_str = (
+            f"$$\\begin{{aligned}}"
+            f"P(H_{{n+1}}=1\\mid\\text{{streak of }}k) &= p \\\\"
+            f"E[L_n] &\\approx \\lfloor\\log_{{1/p}}(n(1-p))\\rfloor"
+            f"\\end{{aligned}}$$"
+        )
+        return ui.HTML(math_str)
+
+    @render.ui
+    def pdx_gf_formula_note():
+        return ui.div(
+            "Top: by independence, conditioning on history changes nothing. ",
+            "Bottom: even pure randomness produces long streaks — they are "
+            "expected, not anomalous.",
+            style="font-size:0.72rem; color:var(--c-text3); line-height:1.45;",
+        )
+
+    # ── Stats ───────────────────────────────────────────────────────────
+    @render.text
+    def pdx_gf_stat_p():
+        return f"{input.pdx_gf_p():.3f}"
+
+    @render.text
+    def pdx_gf_stat_after_k():
+        d = _gf_sim_data()
+        k = input.pdx_gf_k()
+        after = d['after_k'].get(k, np.array([]))
+        if len(after) == 0:
+            return "—"
+        return f"{after.mean():.3f}"
+
+    @render.text
+    def pdx_gf_stat_avg_max():
+        return f"{_gf_sim_data()['max_streaks'].mean():.1f}"
+
+    @render.text
+    def pdx_gf_stat_exp_max():
+        return str(_expected_max_streak(input.pdx_gf_p(), input.pdx_gf_n()))
+
+    # ── Chart caption (dynamic per view) ────────────────────────────────
+    @render.ui
+    def pdx_gf_chart_caption():
+        view = input.pdx_gf_view()
+        caption_style = (
+            "font-size:0.72rem; color:var(--c-text3); "
+            "font-style:italic; line-height:1.45; margin-bottom:4px;"
+        )
+        if view == "Independence Proof":
+            return ui.div(
+                "Each bar shows the empirical P(success | last ≥ k successes) "
+                "across 1 000 simulated runs. The red dashed line is true p; "
+                "the pink band is ±2 SE around p. ",
+                ui.tags.strong("Bars become semi-transparent for large k"),
+                " because fewer cases supply each estimate — fading communicates "
+                "uncertainty without falsely framing deviations as “bad”. "
+                "Almost all bars sit inside the SE band: deviations are sampling "
+                "noise, not evidence of dependence.",
+                style=caption_style,
+            )
+        elif view == "Streak Distribution":
+            return ui.div(
+                "Histogram of the longest streak of successes in each of 1 000 "
+                "simulated runs. The amber line marks the theoretical expectation "
+                "E[L_n] ≈ log_{1/p}(n·(1−p)). ",
+                ui.tags.strong("Long streaks are not anomalies"),
+                " — they are precisely what independence predicts.",
+                style=caption_style,
+            )
+        else:  # Flip Sequence
+            return ui.div(
+                "Top: running proportion of successes (blue) converges to p (red dashed) "
+                "by the Law of Large Numbers — not because the coin corrects itself, "
+                "but because early runs matter less over time. Bottom: actual flip "
+                "sequence as a barcode (green = success, red = failure). ",
+                ui.tags.strong("Amber bands"),
+                " mark every streak of length ≥ k.",
+                style=caption_style,
+            )
+
+    # ── Chart area dispatch ─────────────────────────────────────────────
+    @render.ui
+    def pdx_gf_chart_area():
+        view = input.pdx_gf_view()
+        dark = is_dark()
+        d = _gf_sim_data()
+        k = input.pdx_gf_k()
+
+        if view == "Independence Proof":
+            fig = draw_gf_after_k(d['after_k'], d['p'], k, dark=dark)
+        elif view == "Streak Distribution":
+            fig = draw_gf_streaks(d['max_streaks'], d['p'], d['n'], dark=dark)
+        else:
+            fig = draw_gf_sequence(d['single'], d['p'], k, dark=dark)
 
         return fig_to_ui(fig)

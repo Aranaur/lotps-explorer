@@ -924,3 +924,179 @@ def draw_ratio_effect(
     )
 
     return fig
+
+
+# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# 8.  Exact Binomial PMF distributions with rejection region highlighted
+# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+def draw_binom_distributions(
+    p0: float,
+    p1: float,
+    n: int,
+    alpha: float,
+    power: float,
+    k_lo: int | None,
+    k_hi: int | None,
+    actual_alpha: float,
+    dark: bool = True,
+) -> go.Figure:
+    t = _theme(dark)
+    _ax = _DARK_LAYOUT["xaxis"] if dark else _LIGHT_LAYOUT["xaxis"]
+    _ay = _DARK_LAYOUT["yaxis"] if dark else _LIGHT_LAYOUT["yaxis"]
+
+    mu0 = n * p0
+    mu1 = n * p1
+    sig = max(
+        np.sqrt(n * p0 * (1 - p0)),
+        np.sqrt(n * p1 * (1 - p1)),
+        0.5,
+    )
+    k_min = max(0, int(min(mu0, mu1) - 4 * sig) - 1)
+    k_max = min(n, int(max(mu0, mu1) + 4 * sig) + 2)
+    ks = np.arange(k_min, k_max + 1)
+
+    pmf0 = stats.binom.pmf(ks, n, p0)
+    pmf1 = stats.binom.pmf(ks, n, p1)
+
+    def _in_reject(k):
+        return (k_lo is not None and k <= k_lo) or (k_hi is not None and k >= k_hi)
+
+    colors_h0 = [
+        "rgba(248,113,113,0.75)" if _in_reject(k) else "rgba(148,163,184,0.45)"
+        for k in ks
+    ]
+    colors_h1 = [
+        "rgba(129,140,248,0.85)" if _in_reject(k) else "rgba(129,140,248,0.25)"
+        for k in ks
+    ]
+
+    fig = _base_fig(
+        dark=dark,
+        xaxis=dict(
+            **_ax,
+            title=dict(text="Number of successes (k)", font=dict(size=10, color=t["label"])),
+        ),
+        yaxis=dict(
+            **_ay,
+            title=dict(text="P(X = k)", font=dict(size=10, color=t["label"])),
+        ),
+    )
+
+    fig.add_trace(go.Bar(
+        x=ks.tolist(), y=pmf0.tolist(),
+        marker_color=colors_h0, name="H\u2080",
+        hovertemplate="k=%{x}<br>P(X=k|p\u2080)=%{y:.4f}<extra>H\u2080</extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=ks.tolist(), y=pmf1.tolist(),
+        marker_color=colors_h1, name="H\u2081", opacity=0.75,
+        hovertemplate="k=%{x}<br>P(X=k|p\u2081)=%{y:.4f}<extra>H\u2081</extra>",
+    ))
+    fig.update_layout(barmode="overlay")
+
+    if k_lo is not None:
+        fig.add_vline(x=k_lo + 0.5, line_dash="dot", line_color="#f87171", line_width=1.2)
+    if k_hi is not None:
+        fig.add_vline(x=k_hi - 0.5, line_dash="dot", line_color="#f87171", line_width=1.2)
+
+    fig.add_vline(x=mu0, line_dash="dash", line_color="#94a3b8", line_width=1)
+    if abs(p1 - p0) > 1e-9:
+        fig.add_vline(x=mu1, line_dash="dash", line_color="#818cf8", line_width=1)
+
+    fig.add_annotation(x=mu0, y=float(pmf0.max()) * 1.08, text="H\u2080",
+                       showarrow=False, font=dict(size=11, color="#94a3b8"))
+    if abs(p1 - p0) > 1e-9:
+        fig.add_annotation(x=mu1, y=float(pmf1.max()) * 1.08, text="H\u2081",
+                           showarrow=False, font=dict(size=11, color="#818cf8"))
+
+    beta = max(0.0, 1 - power)
+    muted_col = t["muted"]
+    lines = [
+        f"p\u2080\u200a=\u200a{p0:.4f}",
+        f"p\u2081\u200a=\u200a{p1:.4f}",
+        f"Power\u200a=\u200a{power:.3f}",
+        f"\u03b2\u200a=\u200a{beta:.3f}",
+        f"\u03b1 nominal\u200a=\u200a{alpha}",
+        f"\u03b1 actual\u200a=\u200a{actual_alpha:.4f}",
+        f"n\u200a=\u200a{n:,}",
+        f"<span style='color:{muted_col}'>Exact binomial</span>",
+    ]
+    fig.add_annotation(
+        xref="paper", yref="paper", x=0.98, y=0.98,
+        xanchor="right", yanchor="top",
+        text="<br>".join(lines), showarrow=False,
+        font=dict(size=10, color=t["annot_text"]),
+        bgcolor=t["annot_bg"], bordercolor=t["annot_border2"],
+        borderwidth=1, borderpad=4, align="left",
+    )
+    return fig
+
+
+# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# 9.  Bernoulli effect visualisation for binomial test
+# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+def draw_binom_effect(
+    p0: float,
+    p1: float,
+    dark: bool = True,
+) -> go.Figure:
+    t = _theme(dark)
+    _ax = _DARK_LAYOUT["xaxis"] if dark else _LIGHT_LAYOUT["xaxis"]
+    _ay = _DARK_LAYOUT["yaxis"] if dark else _LIGHT_LAYOUT["yaxis"]
+
+    h = float(2 * np.arcsin(np.sqrt(p1)) - 2 * np.arcsin(np.sqrt(p0)))
+    h_abs = abs(h)
+    if h_abs < 0.2:
+        eff_label, eff_color = "negligible", "#94a3b8"
+    elif h_abs < 0.5:
+        eff_label, eff_color = "small", "#34d399"
+    elif h_abs < 0.8:
+        eff_label, eff_color = "medium", "#fbbf24"
+    else:
+        eff_label, eff_color = "large", "#f87171"
+
+    delta_p = p1 - p0
+    rel_lift = delta_p / p0 * 100 if p0 > 1e-9 else 0.0
+    cats = ["Failure (0)", "Success (1)"]
+
+    fig = _base_fig(
+        dark=dark,
+        xaxis=dict(**_ax, title=dict(text="Outcome", font=dict(size=10, color=t["label"]))),
+        yaxis=dict(
+            **_ay,
+            title=dict(text="Probability", font=dict(size=10, color=t["label"])),
+            range=[0, 1.20], tickformat=".0%",
+        ),
+    )
+
+    fig.add_trace(go.Bar(
+        x=cats, y=[1 - p0, p0], name="H\u2080 (p\u2080)",
+        marker_color=["rgba(148,163,184,0.40)", "rgba(148,163,184,0.85)"],
+        text=[f"{1-p0:.3f}", f"{p0:.3f}"], textposition="outside",
+        textfont=dict(color="#94a3b8", size=10),
+        hovertemplate="%{x}: %{y:.4f}<extra>H\u2080</extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=cats, y=[1 - p1, p1], name="H\u2081 (p\u2081)",
+        marker_color=["rgba(129,140,248,0.40)", "rgba(129,140,248,0.85)"],
+        text=[f"{1-p1:.3f}", f"{p1:.3f}"], textposition="outside",
+        textfont=dict(color="#818cf8", size=10),
+        hovertemplate="%{x}: %{y:.4f}<extra>H\u2081</extra>",
+    ))
+    fig.update_layout(barmode="group", bargap=0.15, bargroupgap=0.05)
+
+    lines = [
+        f"Cohen\u2019s h\u200a=\u200a{h_abs:.3f}",
+        f"\u0394p\u200a=\u200a{delta_p:+.4f}",
+        f"Rel. lift\u200a=\u200a{rel_lift:+.1f}\u200a%",
+        f"Effect: <span style='color:{eff_color}'>{eff_label}</span>",
+    ]
+    fig.add_annotation(
+        xref="paper", yref="paper", x=0.98, y=0.98,
+        xanchor="right", yanchor="top",
+        text="<br>".join(lines), showarrow=False,
+        font=dict(size=10, color=t["annot_text"]),
+        bgcolor=t["annot_bg"], bordercolor=t["annot_border2"],
+        borderwidth=1, borderpad=4, align="left",
+    )
+    return fig

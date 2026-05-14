@@ -13,6 +13,7 @@ from power_plots import (
     draw_power_distributions, draw_power_curve, draw_cohens_d_overlap,
     draw_prop_distributions, draw_prop_effect,
     draw_ratio_distributions, draw_ratio_effect,
+    draw_binom_distributions, draw_binom_effect,
 )
 from theme import fig_to_ui
 
@@ -246,6 +247,89 @@ def _solve_alpha_ratio(var_r, r0, r1, n, target, alt):
         return None
 
 
+# ── Binomial test power computation (exact) ─────────────────────────────────
+
+def _binom_rejection_region(n: int, p0: float, alpha: float, alt: str):
+    """Return (k_lo, k_hi) for the rejection region.
+    k_lo: reject if X <= k_lo (None if no left tail)
+    k_hi: reject if X >= k_hi (None if no right tail)
+    Uses ppf-based formula: k_hi = ppf(1-α)+1 ensures P(X≥k_hi|p₀) ≤ α.
+    """
+    if alt == "two-sided":
+        a2 = alpha / 2
+        k_lo = int(stats.binom.ppf(a2, n, p0)) - 1
+        k_hi = int(stats.binom.ppf(1 - a2, n, p0)) + 1
+        return (k_lo if k_lo >= 0 else None), (k_hi if k_hi <= n else None)
+    if alt == "greater":
+        k_hi = int(stats.binom.ppf(1 - alpha, n, p0)) + 1
+        return None, (k_hi if k_hi <= n else None)
+    # less
+    k_lo = int(stats.binom.ppf(alpha, n, p0)) - 1
+    return (k_lo if k_lo >= 0 else None), None
+
+
+def _actual_alpha_binom(n: int, p0: float, alpha: float, alt: str) -> float:
+    k_lo, k_hi = _binom_rejection_region(n, p0, alpha, alt)
+    a = 0.0
+    if k_lo is not None:
+        a += float(stats.binom.cdf(k_lo, n, p0))
+    if k_hi is not None:
+        a += float(stats.binom.sf(k_hi - 1, n, p0))
+    return float(np.clip(a, 0.0, 1.0))
+
+
+def _power_binom(p0: float, p1: float, n: int, alpha: float, alt: str) -> float:
+    k_lo, k_hi = _binom_rejection_region(n, p0, alpha, alt)
+    pw = 0.0
+    if k_lo is not None:
+        pw += float(stats.binom.cdf(k_lo, n, p1))
+    if k_hi is not None:
+        pw += float(stats.binom.sf(k_hi - 1, n, p1))
+    return float(np.clip(pw, 0.0, 1.0))
+
+
+def _solve_n_binom(p0, p1, alpha, target, alt):
+    if abs(p1 - p0) < 1e-9:
+        return None
+    if _power_binom(p0, p1, 2, alpha, alt) >= target:
+        return 2
+    if _power_binom(p0, p1, 500_000, alpha, alt) < target:
+        return None
+    lo, hi = 2, 500_000
+    while lo < hi - 1:
+        mid = (lo + hi) // 2
+        if _power_binom(p0, p1, mid, alpha, alt) >= target:
+            hi = mid
+        else:
+            lo = mid
+    return hi
+
+
+def _solve_p1_binom(p0, n, alpha, target, alt):
+    def f(p1):
+        return _power_binom(p0, p1, n, alpha, alt) - target
+
+    lo, hi = p0 + 1e-6, 1.0 - 1e-6
+    if lo >= hi:
+        return None
+    if f(lo) >= 0:
+        return float(lo)
+    if f(hi) < 0:
+        return None
+    try:
+        return float(brentq(f, lo, hi))
+    except ValueError:
+        return None
+
+
+def _solve_alpha_binom(p0, p1, n, target, alt):
+    """Scan α grid — power(α) is a non-decreasing step function."""
+    for a in np.linspace(0.001, 0.50, 5000):
+        if _power_binom(p0, p1, n, float(a), alt) >= target:
+            return float(a)
+    return None
+
+
 # ── Server function ──────────────────────────────────────────────────────────
 
 def power_server(input, output, session, is_dark):
@@ -260,6 +344,12 @@ def power_server(input, output, session, is_dark):
     def _is_ratio():
         try:
             return input.pw_metric_type() == "ratio"
+        except Exception:
+            return False
+
+    def _is_binom():
+        try:
+            return input.pw_metric_type() == "binomial"
         except Exception:
             return False
 
@@ -388,6 +478,13 @@ def power_server(input, output, session, is_dark):
                 "d":     "Target rate (p\u2081)",
                 "alpha": "Significance level (\u03b1)",
             })
+        elif _is_binom():
+            ui.update_select("pw_solve_for", choices={
+                "power": "Power (1\u2212\u03b2)",
+                "n":     "Sample size (n)",
+                "d":     "Target rate (p\u2081)",
+                "alpha": "Significance level (\u03b1)",
+            })
         else:
             ui.update_select("pw_solve_for", choices={
                 "power": "Power (1\u2212\u03b2)",
@@ -410,6 +507,8 @@ def power_server(input, output, session, is_dark):
             val = f"{n:,}" if n_feasible else "\u2014 (increase effect or \u03b1)"
             if is_prop or is_ratio:
                 label = "Sample size (n per group)"
+            elif _is_binom():
+                label = "Sample size (n)"
             else:
                 tt = input.pw_test_type()
                 label = "Sample size (n per group)" if tt == "two_t" else "Sample size (n)"
@@ -420,7 +519,7 @@ def power_server(input, output, session, is_dark):
                 r0 = _mu_x() / max(abs(_mu_y()), 1e-15)
                 lift = (d_or_p1 - r0) / r0 * 100 if abs(r0) > 1e-15 else 0.0
                 return _param_display("Expected lift (%)", f"{lift:.2f}%", "d")
-            if is_prop:
+            if is_prop or _is_binom():
                 return _param_display("Target rate (p\u2081)", f"{d_or_p1:.4f}", "d")
             return _param_display("Cohen\u2019s d", f"{d_or_p1:.3f}", "d")
         if solve == "alpha":
@@ -451,6 +550,16 @@ def power_server(input, output, session, is_dark):
                                "(pooled SE under H\u2080).")),
                 choices={"two_prop_z": "Two-sample proportion Z"},
                 selected=_p.get("pw_test_type", "two_prop_z"), width="100%",
+            )
+
+        if _is_binom():
+            return ui.input_select(
+                "pw_test_type",
+                ui.TagList("Test type",
+                           tip("Exact binomial test for a single proportion against a known null p\u2080. "
+                               "Uses the exact Binomial CDF \u2014 no normal approximation.")),
+                choices={"binom_exact": "Exact binomial (one-sample)"},
+                selected="binom_exact", width="100%",
             )
 
         return ui.input_select(
@@ -575,6 +684,35 @@ def power_server(input, output, session, is_dark):
                 ),
             )
 
+        if _is_binom():
+            if solve == "d":
+                return ui.div()
+            with reactive.isolate():
+                _p = _pw_preset_params()
+            p0_val = _p.get("pw_p0", 0.50)
+            p1_val = _p.get("pw_p1", 0.55)
+            delta = p1_val - p0_val
+            rel = delta / p0_val * 100 if p0_val > 1e-9 else 0.0
+            return ui.div(
+                ui.input_slider(
+                    "pw_p0",
+                    ui.TagList("Null rate (p₀)",
+                               tip("H₀ probability of success — the known baseline under the null hypothesis.")),
+                    min=0.001, max=0.999, value=p0_val, step=0.001, width="100%",
+                ),
+                ui.input_slider(
+                    "pw_p1",
+                    ui.TagList("Alternative rate (p₁)",
+                               tip("True probability of success under H₁.")),
+                    min=0.001, max=0.999, value=p1_val, step=0.001, width="100%",
+                ),
+                ui.div(
+                    f"Δp = {delta:+.4f}  ·  rel. lift = {rel:+.1f} %",
+                    class_="np-preset-hint",
+                    style="text-align:center; margin-top:2px;",
+                ),
+            )
+
         # Continuous mode — original Cohen's d slider
         if solve == "d":
             return ui.div()
@@ -614,6 +752,17 @@ def power_server(input, output, session, is_dark):
                     ui.TagList("Sample size (n per group)",
                                tip("Number of observations per group (equal groups).")),
                     value=_p.get("pw_n", 500), min=2, max=2_000_000, step=10, width="100%",
+                ),
+                class_="slider-row",
+            )
+
+        if _is_binom():
+            return ui.div(
+                ui.input_numeric(
+                    "pw_n",
+                    ui.TagList("Number of trials (n)",
+                               tip("Total number of Bernoulli trials in the sample.")),
+                    value=_p.get("pw_n", 100), min=1, max=500_000, step=10, width="100%",
                 ),
                 class_="slider-row",
             )
@@ -754,6 +903,33 @@ def power_server(input, output, session, is_dark):
         ),
     }
 
+    _PRESET_DESC_BINOM = {
+        "binom_coin": (
+            "Biased coin",
+            "p\u2080\u200a=\u200a0.50, p\u2081\u200a=\u200a0.55, \u03b1\u200a=\u200a0.05, solve for n. "
+            "Classic test of a fair coin. Even a 5% bias requires hundreds of flips "
+            "to detect reliably. Note: actual \u03b1 \u2264 0.05 due to discreteness.",
+        ),
+        "binom_qc": (
+            "Quality control",
+            "p\u2080\u200a=\u200a0.01, p\u2081\u200a=\u200a0.02, \u03b1\u200a=\u200a0.05, solve for n. "
+            "Defect rate monitoring. Doubling a rare defect rate still demands "
+            "thousands of items \u2014 low base rates inflate required n dramatically.",
+        ),
+        "binom_clinical": (
+            "Clinical response",
+            "p\u2080\u200a=\u200a0.20, p\u2081\u200a=\u200a0.30, \u03b1\u200a=\u200a0.05, solve for n. "
+            "Drug response rate test. A 10\u200app absolute lift is clinically meaningful "
+            "but still requires a substantial sample to detect reliably.",
+        ),
+        "binom_rare": (
+            "Rare event",
+            "p\u2080\u200a=\u200a0.005, p\u2081\u200a=\u200a0.010, \u03b1\u200a=\u200a0.05, solve for n. "
+            "Doubling a very rare event. Discreteness effects are most extreme "
+            "at tiny p \u2014 actual \u03b1 can fall far below the nominal level.",
+        ),
+    }
+
     def _set_preset(d=None, n=None, alpha=None, power=None,
                     test_type="one_t", alternative="two-sided", solve_for="power",
                     p0=None, p1=None,
@@ -876,7 +1052,36 @@ def power_server(input, output, session, is_dark):
                     cov_xy=50, lift_pct=8.0, alpha=0.05,
                     test_type="delta_z", solve_for="n", power=0.80)
 
-    # Presets UI — switches between continuous, proportion, and ratio button sets
+    # Binomial presets
+    @reactive.effect
+    @reactive.event(input.pw_pre_binom_coin)
+    def _pr_binom_coin():
+        _active_preset.set("binom_coin")
+        _set_preset(p0=0.50, p1=0.55, alpha=0.05, power=0.80,
+                    test_type="binom_exact", solve_for="n")
+
+    @reactive.effect
+    @reactive.event(input.pw_pre_binom_qc)
+    def _pr_binom_qc():
+        _active_preset.set("binom_qc")
+        _set_preset(p0=0.01, p1=0.02, alpha=0.05, power=0.80,
+                    test_type="binom_exact", solve_for="n")
+
+    @reactive.effect
+    @reactive.event(input.pw_pre_binom_clinical)
+    def _pr_binom_clinical():
+        _active_preset.set("binom_clinical")
+        _set_preset(p0=0.20, p1=0.30, alpha=0.05, power=0.80,
+                    test_type="binom_exact", solve_for="n")
+
+    @reactive.effect
+    @reactive.event(input.pw_pre_binom_rare)
+    def _pr_binom_rare():
+        _active_preset.set("binom_rare")
+        _set_preset(p0=0.005, p1=0.010, alpha=0.05, power=0.80,
+                    test_type="binom_exact", solve_for="n")
+
+    # Presets UI — switches between continuous, proportion, ratio, and binomial button sets
     @render.ui
     def pw_presets_ui():
         if _is_ratio():
@@ -917,6 +1122,25 @@ def power_server(input, output, session, is_dark):
                 ),
             )
 
+        if _is_binom():
+            return ui.div(
+                ui.tags.label(
+                    "Scenario presets",
+                    style="font-weight:500; color:var(--c-text3); font-size:0.82rem; margin-bottom:2px;",
+                ),
+                ui.div(
+                    ui.input_action_button("pw_pre_binom_coin",     "Biased coin",
+                                           class_="btn-ctrl btn-preset"),
+                    ui.input_action_button("pw_pre_binom_qc",       "Quality ctrl",
+                                           class_="btn-ctrl btn-preset"),
+                    ui.input_action_button("pw_pre_binom_clinical", "Clinical",
+                                           class_="btn-ctrl btn-preset"),
+                    ui.input_action_button("pw_pre_binom_rare",     "Rare event",
+                                           class_="btn-ctrl btn-preset"),
+                    class_="np-preset-grid",
+                ),
+            )
+
         return ui.div(
             ui.tags.label(
                 "Scenario presets",
@@ -938,7 +1162,7 @@ def power_server(input, output, session, is_dark):
     @render.ui
     def pw_preset_desc():
         key = _active_preset()
-        descs = {**_PRESET_DESC_CONT, **_PRESET_DESC_PROP, **_PRESET_DESC_RATIO}
+        descs = {**_PRESET_DESC_CONT, **_PRESET_DESC_PROP, **_PRESET_DESC_RATIO, **_PRESET_DESC_BINOM}
         if key is None or key not in descs:
             return ui.div(
                 "\u2190 Select a preset to see what it demonstrates.",
@@ -1014,6 +1238,29 @@ def power_server(input, output, session, is_dark):
                 p1 = result if result is not None else p1
             elif solve == "alpha":
                 result = _solve_alpha_prop(p0, p1, n, power, alt)
+                alpha = result if result is not None else alpha
+
+            power = max(0.0, min(1.0, power))
+            return p1, n, alpha, power, n_feasible
+
+        if _is_binom():
+            p0 = _p0()
+            p1 = _p1()
+            n  = _n()
+
+            if solve == "power":
+                power = _power_binom(p0, p1, n, alpha, alt)
+            elif solve == "n":
+                result = _solve_n_binom(p0, p1, alpha, power, alt)
+                if result is not None:
+                    n = result
+                else:
+                    n_feasible = False
+            elif solve == "d":  # "d" slot = solve for p₁
+                result = _solve_p1_binom(p0, n, alpha, power, alt)
+                p1 = result if result is not None else p1
+            elif solve == "alpha":
+                result = _solve_alpha_binom(p0, p1, n, power, alt)
                 alpha = result if result is not None else alpha
 
             power = max(0.0, min(1.0, power))
@@ -1128,6 +1375,47 @@ def power_server(input, output, session, is_dark):
                 class_="stats-row",
             )
 
+        if _is_binom():
+            return ui.div(
+                ui.div(
+                    ui.div(
+                        "NULL RATE (p\u2080)\u00a0",
+                        tip("H\u2080 probability of success."),
+                        class_="stat-label",
+                    ),
+                    ui.div(ui.output_text("pw_stat_p0", inline=True), class_="stat-value pw-d"),
+                    class_="stat-card",
+                ),
+                ui.div(
+                    ui.div(
+                        "ALT. RATE (p\u2081)\u00a0",
+                        tip("True probability of success under H\u2081."),
+                        class_="stat-label",
+                    ),
+                    ui.div(ui.output_text("pw_stat_p1", inline=True), class_="stat-value pw-n"),
+                    class_="stat-card",
+                ),
+                ui.div(
+                    ui.div(
+                        "ACTUAL \u03b1\u00a0",
+                        tip("Achieved Type\u00a0I error \u2014 always \u2264 nominal \u03b1 due to discreteness of the binomial."),
+                        class_="stat-label",
+                    ),
+                    ui.div(ui.output_text("pw_stat_binom_actual_alpha", inline=True), class_="stat-value pw-alpha"),
+                    class_="stat-card",
+                ),
+                ui.div(
+                    ui.div(
+                        "POWER (1\u2212\u03b2)\u00a0",
+                        tip("Probability of rejecting H\u2080 when H\u2081 is true."),
+                        class_="stat-label",
+                    ),
+                    ui.div(ui.output_text("pw_stat_power", inline=True), class_="stat-value pw-power"),
+                    class_="stat-card",
+                ),
+                class_="stats-row",
+            )
+
         # Continuous mode
         return ui.div(
             ui.div(
@@ -1211,6 +1499,12 @@ def power_server(input, output, session, is_dark):
         lift = (r1 - r0) / r0 * 100 if abs(r0) > 1e-15 else 0.0
         return f"{lift:+.2f}%"
 
+    @render.text
+    def pw_stat_binom_actual_alpha():
+        _, n, alpha, *_ = pw_computed()
+        actual = _actual_alpha_binom(n, _p0(), alpha, input.pw_alternative())
+        return f"{actual:.4f}"
+
     # ── Power curve data ──────────────────────────────────────────────────────
     @reactive.calc
     def _curve_data():
@@ -1249,6 +1543,21 @@ def power_server(input, output, session, is_dark):
             ]))
             powers = np.array([
                 _power_prop(p0, p1, int(ni), alpha, alt) for ni in ns
+            ])
+            return ns, powers
+
+        if _is_binom():
+            p0 = _p0()
+            p1 = d_or_p1
+            if abs(p1 - p0) < 1e-9:
+                return np.array([]), np.array([])
+            max_n = max(2000, int(n * 1.5))
+            ns = np.unique(np.concatenate([
+                np.arange(1, min(50, max_n + 1)),
+                np.linspace(50, max_n, 300).astype(int),
+            ]))
+            powers = np.array([
+                _power_binom(p0, p1, int(ni), alpha, alt) for ni in ns
             ])
             return ns, powers
 
@@ -1311,6 +1620,17 @@ def power_server(input, output, session, is_dark):
             )
             return fig_to_ui(fig)
 
+        if _is_binom():
+            alt = input.pw_alternative()
+            p0 = _p0()
+            k_lo, k_hi = _binom_rejection_region(n, p0, alpha, alt)
+            actual_alpha = _actual_alpha_binom(n, p0, alpha, alt)
+            fig = draw_binom_distributions(
+                p0=p0, p1=d_or_p1, n=n, alpha=alpha, power=power,
+                k_lo=k_lo, k_hi=k_hi, actual_alpha=actual_alpha, dark=is_dark(),
+            )
+            return fig_to_ui(fig)
+
         tt    = input.pw_test_type()
         solve = input.pw_solve_for()
         n2    = _n2() if (tt == "two_t" and solve != "n") else None
@@ -1350,6 +1670,10 @@ def power_server(input, output, session, is_dark):
 
         if _is_prop():
             fig = draw_prop_effect(p0=_p0(), p1=d_or_p1, dark=is_dark())
+            return fig_to_ui(fig)
+
+        if _is_binom():
+            fig = draw_binom_effect(p0=_p0(), p1=d_or_p1, dark=is_dark())
             return fig_to_ui(fig)
 
         fig = draw_cohens_d_overlap(d=d_or_p1, dark=is_dark())

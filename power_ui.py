@@ -41,6 +41,7 @@ def power_panel() -> ui.Tag:
                         "continuous": "Continuous (means)",
                         "proportion": "Proportions (rates)",
                         "ratio":      "Ratio (delta method)",
+                        "binomial":   "Binomial (exact test)",
                     },
                     selected="continuous", width="100%",
                 ),

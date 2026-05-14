@@ -1673,7 +1673,8 @@ def power_server(input, output, session, is_dark):
             return fig_to_ui(fig)
 
         if _is_binom():
-            fig = draw_binom_effect(p0=_p0(), p1=d_or_p1, dark=is_dark())
+            _, n_val, *_ = pw_computed()
+            fig = draw_binom_effect(p0=_p0(), p1=d_or_p1, n=n_val, dark=is_dark())
             return fig_to_ui(fig)
 
         fig = draw_cohens_d_overlap(d=d_or_p1, dark=is_dark())

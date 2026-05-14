@@ -1038,8 +1038,11 @@ def draw_binom_distributions(
 def draw_binom_effect(
     p0: float,
     p1: float,
+    n: int,
     dark: bool = True,
 ) -> go.Figure:
+    """Binom(n, p₀) vs Binom(n, p₁) PMF bars with overlap shading — analogous
+    to draw_cohens_d_overlap but for a discrete distribution."""
     t = _theme(dark)
     _ax = _DARK_LAYOUT["xaxis"] if dark else _LIGHT_LAYOUT["xaxis"]
     _ay = _DARK_LAYOUT["yaxis"] if dark else _LIGHT_LAYOUT["yaxis"]
@@ -1057,43 +1060,69 @@ def draw_binom_effect(
 
     delta_p = p1 - p0
     rel_lift = delta_p / p0 * 100 if p0 > 1e-9 else 0.0
-    cats = ["Failure (0)", "Success (1)"]
+
+    # Display range: ±4σ around both means
+    mu0, mu1 = n * p0, n * p1
+    sig = max(np.sqrt(n * p0 * (1 - p0)), np.sqrt(n * p1 * (1 - p1)), 0.5)
+    k_min = max(0, int(min(mu0, mu1) - 4 * sig) - 1)
+    k_max = min(n, int(max(mu0, mu1) + 4 * sig) + 2)
+    ks = np.arange(k_min, k_max + 1)
+
+    pmf0 = stats.binom.pmf(ks, n, p0)
+    pmf1 = stats.binom.pmf(ks, n, p1)
+    pmf_overlap = np.minimum(pmf0, pmf1)
+    overlap_pct = float(pmf_overlap.sum() * 100)
 
     fig = _base_fig(
         dark=dark,
-        xaxis=dict(**_ax, title=dict(text="Outcome", font=dict(size=10, color=t["label"]))),
+        xaxis=dict(
+            **_ax,
+            title=dict(text="Number of successes (k)", font=dict(size=10, color=t["label"])),
+        ),
         yaxis=dict(
             **_ay,
-            title=dict(text="Probability", font=dict(size=10, color=t["label"])),
-            range=[0, 1.20], tickformat=".0%",
+            title=dict(text="P(X = k)", font=dict(size=10, color=t["label"])),
         ),
     )
 
     fig.add_trace(go.Bar(
-        x=cats, y=[1 - p0, p0], name="H\u2080 (p\u2080)",
-        marker_color=["rgba(148,163,184,0.40)", "rgba(148,163,184,0.85)"],
-        text=[f"{1-p0:.3f}", f"{p0:.3f}"], textposition="outside",
-        textfont=dict(color="#94a3b8", size=10),
-        hovertemplate="%{x}: %{y:.4f}<extra>H\u2080</extra>",
+        x=ks.tolist(), y=pmf0.tolist(), name="H₀",
+        marker_color="rgba(148,163,184,0.45)",
+        hovertemplate="k=%{x}<br>P(X=k|p₀)=%{y:.4f}<extra>H₀</extra>",
     ))
     fig.add_trace(go.Bar(
-        x=cats, y=[1 - p1, p1], name="H\u2081 (p\u2081)",
-        marker_color=["rgba(129,140,248,0.40)", "rgba(129,140,248,0.85)"],
-        text=[f"{1-p1:.3f}", f"{p1:.3f}"], textposition="outside",
-        textfont=dict(color="#818cf8", size=10),
-        hovertemplate="%{x}: %{y:.4f}<extra>H\u2081</extra>",
+        x=ks.tolist(), y=pmf1.tolist(), name="H₁",
+        marker_color="rgba(129,140,248,0.45)",
+        hovertemplate="k=%{x}<br>P(X=k|p₁)=%{y:.4f}<extra>H₁</extra>",
     ))
-    fig.update_layout(barmode="group", bargap=0.15, bargroupgap=0.05)
+    fig.add_trace(go.Bar(
+        x=ks.tolist(), y=pmf_overlap.tolist(), name="Overlap",
+        marker_color="rgba(103,232,249,0.60)",
+        hovertemplate="k=%{x}<br>overlap=%{y:.4f}<extra>Overlap</extra>",
+    ))
+    fig.update_layout(barmode="overlay")
+
+    fig.add_vline(x=mu0, line_dash="dash", line_color="#94a3b8", line_width=1)
+    if abs(delta_p) > 1e-9:
+        fig.add_vline(x=mu1, line_dash="dash", line_color="#818cf8", line_width=1)
+
+    fig.add_annotation(x=mu0, y=float(pmf0.max()) * 1.10, text="H₀",
+                       showarrow=False, font=dict(size=11, color="#94a3b8"))
+    if abs(delta_p) > 1e-9:
+        fig.add_annotation(x=mu1, y=float(pmf1.max()) * 1.10, text="H₁",
+                           showarrow=False, font=dict(size=11, color="#818cf8"))
 
     lines = [
-        f"Cohen\u2019s h\u200a=\u200a{h_abs:.3f}",
-        f"\u0394p\u200a=\u200a{delta_p:+.4f}",
-        f"Rel. lift\u200a=\u200a{rel_lift:+.1f}\u200a%",
+        f"Cohen’s h = {h_abs:.3f}",
+        f"Δp = {delta_p:+.4f}",
+        f"Rel. lift = {rel_lift:+.1f} %",
+        f"Overlap = {overlap_pct:.1f} %",
+        f"n = {n:,}",
         f"Effect: <span style='color:{eff_color}'>{eff_label}</span>",
     ]
     fig.add_annotation(
-        xref="paper", yref="paper", x=0.98, y=0.98,
-        xanchor="right", yanchor="top",
+        xref="paper", yref="paper", x=0.02, y=0.98,
+        xanchor="left", yanchor="top",
         text="<br>".join(lines), showarrow=False,
         font=dict(size=10, color=t["annot_text"]),
         bgcolor=t["annot_bg"], bordercolor=t["annot_border2"],

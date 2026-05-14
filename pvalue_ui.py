@@ -63,9 +63,10 @@ def pvalue_panel() -> ui.Tag:
                         ),
                     ),
                     choices={
-                        "one":    "One-sample",
-                        "two":    "Two-sample (independent)",
-                        "paired": "Paired",
+                        "one":      "One-sample",
+                        "two":      "Two-sample (independent)",
+                        "paired":   "Paired",
+                        "binomial": "Binomial (exact)",
                     },
                     selected="one",
                     width="100%",
@@ -140,27 +141,8 @@ def pvalue_panel() -> ui.Tag:
                     min=0.01, max=0.20, value=0.05, step=0.01, width="100%",
                 ),
 
-                # Test method
-                ui.input_select(
-                    "pv_test_method",
-                    ui.TagList(
-                        "Test method",
-                        tip(
-                            "t-test: \u03c3 is estimated from each sample \u2014 "
-                            "the null distribution is t(df). "
-                            "Realistic scenario (unknown \u03c3). "
-                            "z-test: uses the true Population \u03c3 directly \u2014 "
-                            "the null distribution is N(0,\u00a01). "
-                            "Idealized / theoretical scenario."
-                        ),
-                    ),
-                    choices={
-                        "t": "t-test  (estimate \u03c3 from sample)",
-                        "z": "z-test  (use true \u03c3)",
-                    },
-                    selected="t",
-                    width="100%",
-                ),
+                # Test method (dynamic \u2014 hidden for binomial)
+                ui.output_ui("pv_test_method_ui"),
 
                 # Scenario presets
                 ui.tags.label(
@@ -178,43 +160,16 @@ def pvalue_panel() -> ui.Tag:
                                            class_="btn-ctrl btn-preset"),
                     ui.input_action_button("pv_pre_paired",  "Paired",
                                            class_="btn-ctrl btn-preset"),
+                    ui.input_action_button("pv_pre_binom_fair", "Biased coin",
+                                           class_="btn-ctrl btn-preset"),
+                    ui.input_action_button("pv_pre_binom_rare", "Rare event",
+                                           class_="btn-ctrl btn-preset"),
                     class_="np-preset-grid",
                 ),
                 ui.output_ui("pv_preset_desc"),
 
-                # ── Robustness options ────────────────────────────────────────
-                ui.tags.hr(style="border-color: rgba(255,255,255,0.12); margin: 6px 0;"),
-                ui.div(
-                    ui.input_checkbox(
-                        "pv_outlier_on",
-                        ui.TagList(
-                            "Inject outlier\u00a0",
-                            tip(
-                                "Replaces one observation in every sample with an extreme value "
-                                "opposing the true effect. "
-                                "Shows how a single outlier inflates variance and pulls the "
-                                "sample mean toward H\u2080, pushing a significant result "
-                                "into non-significance. Larger magnitude \u2192 more broken test."
-                            ),
-                        ),
-                        value=False,
-                    ),
-                    ui.input_checkbox(
-                        "pv_wilcoxon_on",
-                        ui.TagList(
-                            "Wilcoxon test\u00a0",
-                            tip(
-                                "Runs a nonparametric test alongside the t/z-test on every sample. "
-                                "One-sample & Paired \u2192 Wilcoxon signed-rank; "
-                                "Two-sample \u2192 Mann-Whitney U. "
-                                "Especially useful with outlier injection to see how "
-                                "nonparametric tests resist contamination."
-                            ),
-                        ),
-                        value=False,
-                    ),
-                    class_="pv-checks-row",
-                ),
+                # ── Robustness options (dynamic — hidden for binomial) ────────
+                ui.output_ui("pv_robustness_ui"),
                 ui.output_ui("pv_outlier_slider"),
 
                 # ── Cross-reference: Sequential Testing ───────────────────────

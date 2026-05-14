@@ -15,10 +15,45 @@ from pvalue_plots import (
     draw_pvalue_hist,
     draw_power_diagram,
     draw_effect_scatter,
+    draw_binom_null_dist_plot,
+    draw_binom_power_diagram,
 )
 from theme import fig_to_ui
 
 
+
+
+def _binom_rejection_region(n, p0, alpha, alt):
+    from scipy.stats import binom as _binom
+    if alt == "two-sided":
+        k_lo = int(_binom.ppf(alpha / 2, n, p0)) - 1
+        k_hi = int(_binom.ppf(1 - alpha / 2, n, p0)) + 1
+    elif alt == "greater":
+        k_lo = None
+        k_hi = int(_binom.ppf(1 - alpha, n, p0)) + 1
+    else:
+        k_lo = int(_binom.ppf(alpha, n, p0)) - 1
+        k_hi = None
+    if k_lo is not None and k_lo < 0:
+        k_lo = None
+    if k_hi is not None and k_hi > n:
+        k_hi = None
+    return k_lo, k_hi
+
+
+def _binom_power(p0, p_true, n, alpha, alt):
+    from scipy.stats import binom as _binom
+    k_lo, k_hi = _binom_rejection_region(n, p0, alpha, alt)
+    power = 0.0
+    if k_lo is not None:
+        power += float(_binom.cdf(k_lo, n, p_true))
+    if k_hi is not None:
+        power += float(1 - _binom.cdf(k_hi - 1, n, p_true))
+    return power
+
+
+def _binom_pval(k, n, p0, alt):
+    return float(stats.binomtest(k, n, p0, alternative=alt).pvalue)
 
 
 def pvalue_server(input, output, session, is_dark):
@@ -82,13 +117,23 @@ def pvalue_server(input, output, session, is_dark):
         p = _safe(input.pv_pi, 0.8)
         return max(0.0, min(1.0, p))
 
+    def _is_binom() -> bool:
+        try:
+            return input.pv_test_structure() == "binomial"
+        except Exception:
+            return False
+
     # ── Computed SE and df for the current test design ────────────────────────
     @reactive.calc
     def _test_se_df():
         """Returns (se, df) for the chosen test structure."""
         structure = input.pv_test_structure()
-        sigma1    = _get_sigma()
         n1        = _get_n()
+
+        if structure == "binomial":
+            return 1.0, n1 - 1
+
+        sigma1 = _get_sigma()
 
         if structure == "one":
             se = sigma1 / np.sqrt(n1)
@@ -120,6 +165,25 @@ def pvalue_server(input, output, session, is_dark):
 
         def pval(key, default):
             return _p.get(key, default)
+
+        if structure == "binomial":
+            return ui.div(
+                ui.input_numeric(
+                    "pv_n",
+                    ui.TagList(
+                        "Number of trials (n)",
+                        tip("Total number of Bernoulli trials per experiment."),
+                    ),
+                    value=pval("pv_n", 50), min=2, max=100_000, step=10, width="100%",
+                ),
+                ui.div(
+                    "μ₀ field = null proportion p₀; "
+                    "True value = p₁",
+                    class_="np-preset-hint",
+                    style="margin-top:4px;",
+                ),
+                class_="group-params-block",
+            )
 
         if structure == "one":
             sigma_col = ui.div(
@@ -224,6 +288,79 @@ def pvalue_server(input, output, session, is_dark):
         return ui.div()
 
     @render.ui
+    def pv_test_method_ui():
+        if _is_binom():
+            return ui.div(
+                ui.tags.label(
+                    "Test method",
+                    style="font-weight:500; color:var(--c-text3); font-size:0.82rem; margin-bottom:2px;",
+                ),
+                ui.div(
+                    "Exact binomial (no t/z approximation)",
+                    style="font-size:0.82rem; color:var(--c-text2); padding:4px 0;",
+                ),
+            )
+        return ui.input_select(
+            "pv_test_method",
+            ui.TagList(
+                "Test method",
+                tip(
+                    "t-test: σ is estimated from each sample — "
+                    "the null distribution is t(df). "
+                    "Realistic scenario (unknown σ). "
+                    "z-test: uses the true Population σ directly — "
+                    "the null distribution is N(0, 1). "
+                    "Idealized / theoretical scenario."
+                ),
+            ),
+            choices={
+                "t": "t-test  (estimate σ from sample)",
+                "z": "z-test  (use true σ)",
+            },
+            selected="t",
+            width="100%",
+        )
+
+    @render.ui
+    def pv_robustness_ui():
+        if _is_binom():
+            return ui.div()
+        return ui.div(
+            ui.tags.hr(style="border-color: rgba(255,255,255,0.12); margin: 6px 0;"),
+            ui.div(
+                ui.input_checkbox(
+                    "pv_outlier_on",
+                    ui.TagList(
+                        "Inject outlier ",
+                        tip(
+                            "Replaces one observation in every sample with an extreme value "
+                            "opposing the true effect. "
+                            "Shows how a single outlier inflates variance and pulls the "
+                            "sample mean toward H₀, pushing a significant result "
+                            "into non-significance. Larger magnitude → more broken test."
+                        ),
+                    ),
+                    value=False,
+                ),
+                ui.input_checkbox(
+                    "pv_wilcoxon_on",
+                    ui.TagList(
+                        "Wilcoxon test ",
+                        tip(
+                            "Runs a nonparametric test alongside the t/z-test on every sample. "
+                            "One-sample & Paired → Wilcoxon signed-rank; "
+                            "Two-sample → Mann-Whitney U. "
+                            "Especially useful with outlier injection to see how "
+                            "nonparametric tests resist contamination."
+                        ),
+                    ),
+                    value=False,
+                ),
+                class_="pv-checks-row",
+            ),
+        )
+
+    @render.ui
     def pv_pi_control():
         if _get_mode() != "pipeline":
             return ui.div()
@@ -285,6 +422,20 @@ def pvalue_server(input, output, session, is_dark):
             "Look at the Power Diagram: \u03c1\u200a=\u200a0.7 collapses the H\u2081 distribution away from the critical value, "
             "so theoretical power is close to 90\u202f% \u2014 switch Test structure to Two-sample to see it drop sharply.",
         ),
+        "binom_fair": (
+            "Biased coin (binomial, two-sided)",
+            "Binomial exact test, p\u2080\u200a=\u200a0.5, p\u2081\u200a=\u200a0.6, n\u200a=\u200a50, two-sided. "
+            "Moderate effect (\u0394p\u200a=\u200a0.1) with moderate power. "
+            "The PMF bars show the discrete rejection region \u2014 notice that actual \u03b1 is slightly below nominal "
+            "because the binomial is discrete and the cutoff must be an integer.",
+        ),
+        "binom_rare": (
+            "Rare event (binomial, right-tailed)",
+            "Binomial exact test, p\u2080\u200a=\u200a0.1, p\u2081\u200a=\u200a0.2, n\u200a=\u200a80, greater. "
+            "Rare baseline event; one-sided test for an increase. "
+            "Look at the Power Diagram: the two PMFs overlap heavily \u2014 doubling a rare rate "
+            "still leaves substantial \u03b2 (Type\u00a0II error) even at n\u200a=\u200a80.",
+        ),
     }
 
     def _pv_set_preset(structure, mu0, mu_true, alpha, method,
@@ -336,6 +487,30 @@ def pvalue_server(input, output, session, is_dark):
         _pv_active_preset.set("paired")
         _pv_set_preset("paired", mu0=0.0, mu_true=0.3, alpha=0.05, method="t",
                        pv_sigma=1.0, pv_sigma2=1.0, pv_rho=0.7, pv_n=20)
+
+    @reactive.effect
+    @reactive.event(input.pv_pre_binom_fair)
+    def _pv_pr_binom_fair():
+        _pv_active_preset.set("binom_fair")
+        _pv_preset_params.set({"pv_n": 50})
+        ui.update_select("pv_test_structure", selected="binomial")
+        ui.update_numeric("pv_mu0",           value=0.5)
+        ui.update_numeric("pv_mu_true",       value=0.6)
+        ui.update_slider("pv_alpha",          value=0.05)
+        ui.update_select("pv_alternative",    selected="two-sided")
+        ui.update_numeric("pv_n",             value=50)
+
+    @reactive.effect
+    @reactive.event(input.pv_pre_binom_rare)
+    def _pv_pr_binom_rare():
+        _pv_active_preset.set("binom_rare")
+        _pv_preset_params.set({"pv_n": 80})
+        ui.update_select("pv_test_structure", selected="binomial")
+        ui.update_numeric("pv_mu0",           value=0.1)
+        ui.update_numeric("pv_mu_true",       value=0.2)
+        ui.update_slider("pv_alpha",          value=0.05)
+        ui.update_select("pv_alternative",    selected="greater")
+        ui.update_numeric("pv_n",             value=80)
 
     @render.ui
     def pv_preset_desc():
@@ -459,7 +634,10 @@ def pvalue_server(input, output, session, is_dark):
         n1          = _get_n()
         alpha       = input.pv_alpha()
         alternative = input.pv_alternative()
-        method      = input.pv_test_method()
+        try:
+            method = input.pv_test_method()
+        except Exception:
+            method = "t"
         structure   = input.pv_test_structure()
         mode        = _get_mode()
 
@@ -539,6 +717,17 @@ def pvalue_server(input, output, session, is_dark):
                 ])
             effects_arr = d - mu0
 
+        elif structure == "binomial":
+            # ── Exact binomial ───────────────────────────────────────────────
+            p0_c     = max(1e-6, min(1 - 1e-6, mu0))
+            p_exp_c  = np.clip(mu_exp, 1e-6, 1 - 1e-6)
+            counts   = np.array([
+                np.random.binomial(n1, float(p_exp_c[j])) for j in range(k)
+            ])
+            stat_arr    = counts.astype(float)
+            pvals       = np.array([_binom_pval(int(c), n1, p0_c, alternative) for c in counts])
+            effects_arr = counts / n1 - p0_c
+
         else:
             # ── Paired ──────────────────────────────────────────────────────
             sigma2 = _get_sigma2()
@@ -603,7 +792,7 @@ def pvalue_server(input, output, session, is_dark):
         except Exception:
             wilcoxon_on = False
 
-        if wilcoxon_on:
+        if wilcoxon_on and structure != "binomial":
             # Map alternative for scipy
             alt_map = {"two-sided": "two-sided", "greater": "greater", "less": "less"}
             scipy_alt = alt_map.get(alternative, "two-sided")
@@ -683,6 +872,14 @@ def pvalue_server(input, output, session, is_dark):
         mu_true = _get_mu_true()
         alpha   = input.pv_alpha()
         alt     = input.pv_alternative()
+        n1      = _get_n()
+
+        if _is_binom():
+            p0_c  = max(1e-6, min(1 - 1e-6, mu0))
+            p1_c  = max(1e-6, min(1 - 1e-6, mu_true))
+            p = _binom_power(p0_c, p1_c, n1, alpha, alt)
+            return f"{float(p):.3f}"
+
         method  = input.pv_test_method()
         se, df  = _test_se_df()
 
@@ -716,10 +913,14 @@ def pvalue_server(input, output, session, is_dark):
         stat = pv_last_stat()
         if stat is None:
             return "\u2014"
-        alt    = input.pv_alternative()
-        method = input.pv_test_method()
-        _, df  = _test_se_df()
-        p = _pval_scalar(stat, alt, method, df)
+        alt = input.pv_alternative()
+        if _is_binom():
+            p0_c = max(1e-6, min(1 - 1e-6, _get_mu0()))
+            p = _binom_pval(int(stat), _get_n(), p0_c, alt)
+        else:
+            method = input.pv_test_method()
+            _, df  = _test_se_df()
+            p = _pval_scalar(stat, alt, method, df)
         return f"{p:.4f}" if p >= 0.0001 else "<0.0001"
 
     @render.text
@@ -818,15 +1019,27 @@ def pvalue_server(input, output, session, is_dark):
     # ── Chart renderers ───────────────────────────────────────────────────────
     @render.ui
     def pv_null_dist_plot():
-        _, df = _test_se_df()
-        fig = draw_null_dist_plot(
-            last_stat=pv_last_stat(),
-            df=df,
-            alpha=input.pv_alpha(),
-            alternative=input.pv_alternative(),
-            method=input.pv_test_method(),
-            dark=is_dark(),
-        )
+        if _is_binom():
+            last_stat = pv_last_stat()
+            last_k = int(last_stat) if last_stat is not None else None
+            fig = draw_binom_null_dist_plot(
+                last_k=last_k,
+                n=_get_n(),
+                p0=max(1e-6, min(1 - 1e-6, _get_mu0())),
+                alpha=input.pv_alpha(),
+                alternative=input.pv_alternative(),
+                dark=is_dark(),
+            )
+        else:
+            _, df = _test_se_df()
+            fig = draw_null_dist_plot(
+                last_stat=pv_last_stat(),
+                df=df,
+                alpha=input.pv_alpha(),
+                alternative=input.pv_alternative(),
+                method=input.pv_test_method(),
+                dark=is_dark(),
+            )
         return fig_to_ui(fig)
 
     @render.ui
@@ -878,17 +1091,28 @@ def pvalue_server(input, output, session, is_dark):
 
     @render.ui
     def pv_power_plot():
-        se, df = _test_se_df()
-        emp    = pv_rejected() / pv_total() if pv_total() > 0 else None
-        fig = draw_power_diagram(
-            mu0=_get_mu0(),
-            mu_true=_get_mu_true(),
-            se_val=se,
-            df=df,
-            alpha=input.pv_alpha(),
-            alternative=input.pv_alternative(),
-            empirical_rate=emp,
-            method=input.pv_test_method(),
-            dark=is_dark(),
-        )
+        emp = pv_rejected() / pv_total() if pv_total() > 0 else None
+        if _is_binom():
+            fig = draw_binom_power_diagram(
+                p0=max(1e-6, min(1 - 1e-6, _get_mu0())),
+                p_true=max(1e-6, min(1 - 1e-6, _get_mu_true())),
+                n=_get_n(),
+                alpha=input.pv_alpha(),
+                alternative=input.pv_alternative(),
+                empirical_rate=emp,
+                dark=is_dark(),
+            )
+        else:
+            se, df = _test_se_df()
+            fig = draw_power_diagram(
+                mu0=_get_mu0(),
+                mu_true=_get_mu_true(),
+                se_val=se,
+                df=df,
+                alpha=input.pv_alpha(),
+                alternative=input.pv_alternative(),
+                empirical_rate=emp,
+                method=input.pv_test_method(),
+                dark=is_dark(),
+            )
         return fig_to_ui(fig)

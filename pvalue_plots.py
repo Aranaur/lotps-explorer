@@ -4,7 +4,7 @@
 
 import numpy as np
 from scipy import stats
-from scipy.stats import nct as nct_dist
+from scipy.stats import nct as nct_dist, binom as binom_dist
 import plotly.graph_objects as go
 
 from plots import _DARK_LAYOUT, _LIGHT_LAYOUT, _LABEL, _LIGHT_LABEL, _base_fig, _theme
@@ -563,4 +563,225 @@ def draw_power_diagram(
         align="left",
     )
 
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4.  Binomial null distribution PMF with rejection/observation bars
+# ─────────────────────────────────────────────────────────────────────────────
+def draw_binom_null_dist_plot(
+    last_k: int | None,
+    n: int,
+    p0: float,
+    alpha: float,
+    alternative: str,
+    dark: bool = True,
+) -> go.Figure:
+    t = _theme(dark)
+    _ax = _DARK_LAYOUT["xaxis"] if dark else _LIGHT_LAYOUT["xaxis"]
+
+    sigma = np.sqrt(n * p0 * (1 - p0))
+    mean  = n * p0
+    lo    = max(0, int(np.floor(mean - 4 * sigma)))
+    hi    = min(n, int(np.ceil(mean + 4 * sigma)))
+    if last_k is not None:
+        lo = min(lo, last_k)
+        hi = max(hi, last_k)
+    ks  = np.arange(lo, hi + 1)
+    pmf = binom_dist.pmf(ks, n, p0)
+
+    if alternative == "two-sided":
+        k_hi = int(binom_dist.ppf(1 - alpha / 2, n, p0)) + 1
+        k_lo = int(binom_dist.ppf(alpha / 2, n, p0)) - 1
+    elif alternative == "greater":
+        k_hi = int(binom_dist.ppf(1 - alpha, n, p0)) + 1
+        k_lo = None
+    else:
+        k_hi = None
+        k_lo = int(binom_dist.ppf(alpha, n, p0)) - 1
+
+    k_lo = None if k_lo is not None and k_lo < 0 else k_lo
+    k_hi = None if k_hi is not None and k_hi > n else k_hi
+
+    def _in_reject(k):
+        in_lo = k_lo is not None and k <= k_lo
+        in_hi = k_hi is not None and k >= k_hi
+        return in_lo or in_hi
+
+    fig = _base_fig(
+        dark=dark,
+        xaxis=dict(
+            **_ax,
+            title=dict(text="k (successes)", font=dict(size=10, color=t["label"])),
+        ),
+        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+    )
+
+    if last_k is None:
+        bar_colors = ["rgba(248,113,113,0.55)" if _in_reject(k) else "rgba(148,163,184,0.35)" for k in ks]
+        fig.add_trace(go.Bar(
+            x=ks, y=pmf,
+            marker=dict(color=bar_colors, line=dict(width=0)),
+            hovertemplate="k=%{x}<br>P=%{y:.4f}<extra></extra>",
+        ))
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.5, y=0.5,
+            text="Press Sample to begin", showarrow=False,
+            font=dict(size=13, color=t["muted"]),
+        )
+        return fig
+
+    pvalue = float(stats.binomtest(last_k, n, p0, alternative=alternative).pvalue)
+    rejected = pvalue < alpha
+
+    bar_colors = []
+    for k in ks:
+        if k == last_k:
+            bar_colors.append("#f87171" if rejected else "#38bdf8")
+        elif _in_reject(k):
+            bar_colors.append("rgba(248,113,113,0.55)")
+        else:
+            bar_colors.append("rgba(148,163,184,0.35)")
+
+    fig.add_trace(go.Bar(
+        x=ks, y=pmf,
+        marker=dict(color=bar_colors, line=dict(width=0)),
+        hovertemplate="k=%{x}<br>P=%{y:.4f}<extra></extra>",
+    ))
+
+    p_str    = f"{pvalue:.4f}" if pvalue >= 0.0001 else "<0.0001"
+    p_hat    = last_k / n
+    decision = "Reject H₀" if rejected else "Fail to reject H₀"
+    line_col = "#f87171" if rejected else "#38bdf8"
+    muted_col = t["muted"]
+    fig.add_annotation(
+        xref="paper", yref="paper", x=0.98, y=0.98,
+        xanchor="right", yanchor="top",
+        text=(
+            f"k = {last_k}<br>"
+            f"p̂ = {p_hat:.4f}<br>"
+            f"p-value = {p_str}<br>"
+            f"<b>{decision}</b><br>"
+            f"<span style='color:{muted_col}'>Binom({n}, {p0})</span>"
+        ),
+        showarrow=False,
+        font=dict(size=10, color=line_col),
+        bgcolor=t["annot_bg"], bordercolor=t["annot_border"], borderwidth=1, borderpad=4,
+        align="right",
+    )
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5.  Binomial power diagram: Binom(n, p₀) vs Binom(n, p_true) PMF overlay
+# ─────────────────────────────────────────────────────────────────────────────
+def draw_binom_power_diagram(
+    p0: float,
+    p_true: float,
+    n: int,
+    alpha: float,
+    alternative: str,
+    empirical_rate: float | None = None,
+    dark: bool = True,
+) -> go.Figure:
+    t = _theme(dark)
+    _ax = _DARK_LAYOUT["xaxis"] if dark else _LIGHT_LAYOUT["xaxis"]
+
+    sigma0 = np.sqrt(n * p0 * (1 - p0))
+    sigma1 = np.sqrt(n * p_true * (1 - p_true))
+    lo = max(0, int(np.floor(min(n * p0, n * p_true) - 4 * max(sigma0, sigma1))))
+    hi = min(n, int(np.ceil(max(n * p0, n * p_true) + 4 * max(sigma0, sigma1))))
+    ks   = np.arange(lo, hi + 1)
+    pmf0 = binom_dist.pmf(ks, n, p0)
+    pmf1 = binom_dist.pmf(ks, n, p_true)
+
+    if alternative == "two-sided":
+        k_hi = int(binom_dist.ppf(1 - alpha / 2, n, p0)) + 1
+        k_lo = int(binom_dist.ppf(alpha / 2, n, p0)) - 1
+    elif alternative == "greater":
+        k_hi = int(binom_dist.ppf(1 - alpha, n, p0)) + 1
+        k_lo = None
+    else:
+        k_hi = None
+        k_lo = int(binom_dist.ppf(alpha, n, p0)) - 1
+
+    k_lo = None if k_lo is not None and k_lo < 0 else k_lo
+    k_hi = None if k_hi is not None and k_hi > n else k_hi
+
+    def _in_reject(k):
+        in_lo = k_lo is not None and k <= k_lo
+        in_hi = k_hi is not None and k >= k_hi
+        return in_lo or in_hi
+
+    null_colors = []
+    alt_colors  = []
+    for k in ks:
+        if _in_reject(k):
+            null_colors.append("rgba(248,113,113,0.65)")
+            alt_colors.append("rgba(192,132,252,0.80)")
+        else:
+            null_colors.append("rgba(148,163,184,0.35)")
+            alt_colors.append("rgba(192,132,252,0.35)")
+
+    actual_alpha = float(
+        binom_dist.cdf(k_lo if k_lo is not None else -1, n, p0)
+        + (1 - binom_dist.cdf(k_hi - 1, n, p0) if k_hi is not None else 0.0)
+    )
+    theo_power = float(
+        binom_dist.cdf(k_lo if k_lo is not None else -1, n, p_true)
+        + (1 - binom_dist.cdf(k_hi - 1, n, p_true) if k_hi is not None else 0.0)
+    )
+
+    fig = _base_fig(
+        dark=dark,
+        xaxis=dict(
+            **_ax,
+            title=dict(text="k (successes)", font=dict(size=10, color=t["label"])),
+        ),
+        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+    )
+
+    fig.add_trace(go.Bar(
+        x=ks, y=pmf0,
+        marker=dict(color=null_colors, line=dict(width=0)),
+        name=f"Binom(n, p₀={p0})",
+        hovertemplate="k=%{x}<br>P(H₀)=%{y:.4f}<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=ks, y=pmf1,
+        marker=dict(color=alt_colors, line=dict(width=0)),
+        name=f"Binom(n, p₁={p_true})",
+        hovertemplate="k=%{x}<br>P(H₁)=%{y:.4f}<extra></extra>",
+        opacity=0.85,
+    ))
+    fig.update_layout(
+        barmode="overlay",
+        legend=dict(
+            font=dict(size=9, color=t["annot_text"]),
+            bgcolor="rgba(0,0,0,0)",
+            x=0.02, y=0.98, xanchor="left", yanchor="top",
+        ),
+    )
+
+    delta_p = p_true - p0
+    muted_col = t["muted"]
+    lines = [
+        f"Δp = {delta_p:+.4f}",
+        f"Theoretical power = {theo_power:.3f}",
+        f"β (Type II) = {1 - theo_power:.3f}",
+        f"<span style='color:{muted_col}'>Actual α = {actual_alpha:.4f} (≤ nominal)</span>",
+    ]
+    if empirical_rate is not None:
+        label = "Empirical power" if abs(delta_p) > 1e-9 else "Type I rate"
+        lines.insert(3, f"{label} = {empirical_rate:.3f}")
+
+    fig.add_annotation(
+        xref="paper", yref="paper", x=0.98, y=0.98,
+        xanchor="right", yanchor="top",
+        text="<br>".join(lines),
+        showarrow=False,
+        font=dict(size=10, color=t["annot_text"]),
+        bgcolor=t["annot_bg"], bordercolor=t["annot_border2"], borderwidth=1, borderpad=4,
+        align="right",
+    )
     return fig
